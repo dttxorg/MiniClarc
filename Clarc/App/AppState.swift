@@ -77,6 +77,10 @@ final class AppState {
     /// triggered by the FS watcher during streaming.
     private var lastCommittedReloadSize: [String: UInt64] = [:]
 
+    /// Retained token for the NSApplication.didBecomeActiveNotification observer.
+    /// Stored so we can remove it in deinit.
+    nonisolated(unsafe) private var didBecomeActiveObserverToken: NSObjectProtocol?
+
     // MARK: - Session Summaries (shared — lightweight metadata for all projects)
 
     var allSessionSummaries: [ChatSession.Summary] = []
@@ -369,20 +373,27 @@ final class AppState {
         self.claude = ClaudeService(cliStore: cliStore)
         self.persistence = PersistenceService(metaStore: metaStore, cliStore: cliStore)
 
-        NotificationCenter.default.addObserver(
+        self.didBecomeActiveObserverToken = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Build project lookup once instead of nested first(where:) per session
+                let projectLookup = Dictionary(uniqueKeysWithValues: self.projects.map { ($0.id, $0.path) })
                 for (sid, state) in self.sessionStates where !state.isStreaming {
                     guard let summary = self.allSessionSummaries.first(where: { $0.id == sid }),
-                          let project = self.projects.first(where: { $0.id == summary.projectId }) else { continue }
-                    self.reloadCommittedFromDisk(sessionId: sid, projectId: summary.projectId, cwd: project.path)
+                          let cwd = projectLookup[summary.projectId] else { continue }
+                    self.reloadCommittedFromDisk(sessionId: sid, projectId: summary.projectId, cwd: cwd)
                 }
             }
         }
+    }
+
+    deinit {
+        let token = didBecomeActiveObserverToken
+        if let token { NotificationCenter.default.removeObserver(token) }
     }
 
     // MARK: - Private State
