@@ -6,6 +6,13 @@ import ClarcChatKit
 
 // MARK: - Per-Session Stream State
 
+/// Cache key for reloadCommittedFromDisk: both size and mtime must match to skip a parse.
+/// Using size alone misses shrink/rewrite (e.g. `claude --resume` compaction).
+private struct ReloadCacheKey: Equatable {
+    let size: UInt64
+    let mtime: Date
+}
+
 /// Encapsulates all independent state per session.
 /// Stored in the `AppState.sessionStates` dictionary keyed by session ID.
 struct SessionStreamState {
@@ -13,9 +20,13 @@ struct SessionStreamState {
     var committedMessages: [ChatMessage] = []
     var streamingTail: StreamingTail?
 
+    /// UI-only messages that are never written to jsonl (errors, compact markers,
+    /// terminal transcript). Survives disk reloads — disk only owns committedMessages.
+    var localAddendum: [ChatMessage] = []
+
     /// The full message list for rendering and saving.
     var allMessages: [ChatMessage] {
-        committedMessages + (streamingTail?.messages ?? [])
+        committedMessages + (streamingTail?.messages ?? []) + localAddendum
     }
 
     // Streaming lifecycle
@@ -72,10 +83,9 @@ final class AppState {
     /// `internal` (not private) — read access required from WindowState / extensions
     var sessionStates: [String: SessionStreamState] = [:]
 
-    /// Last jsonl byte size seen by reloadCommittedFromDisk. Used as a cheap
-    /// short-circuit when the file hasn't grown — avoids the mmap+parse hot loop
-    /// triggered by the FS watcher during streaming.
-    private var lastCommittedReloadSize: [String: UInt64] = [:]
+    /// Last (size, mtime) seen by reloadCommittedFromDisk. Skips parse only when
+    /// both attributes match, so shrink/rewrite always triggers a fresh parse.
+    private var lastCommittedReloadKey: [String: ReloadCacheKey] = [:]
 
     /// Retained token for the NSApplication.didBecomeActiveNotification observer.
     /// Stored so we can remove it in deinit.
@@ -670,6 +680,7 @@ final class AppState {
 
         window.currentSessionId = nil
         sessionStates.removeValue(forKey: window.newSessionKey)
+        lastCommittedReloadKey.removeValue(forKey: window.newSessionKey)
         await sendPrompt(trimmed, skipAppendingUserMessage: true, initialMessages: snapshot, in: window)
     }
 
@@ -822,7 +833,7 @@ final class AppState {
 
         let key = window.currentSessionId ?? window.newSessionKey
         updateState(key) { state in
-            state.committedMessages.append(ChatMessage(role: .user, content: terminal.title))
+            state.localAddendum.append(ChatMessage(role: .user, content: terminal.title))
             let result = exitCode == 0 ? "Done" : "exit code: \(exitCode)"
             let toolCall = ToolCall(
                 id: UUID().uuidString,
@@ -831,7 +842,7 @@ final class AppState {
                 result: result,
                 isError: exitCode != 0
             )
-            state.committedMessages.append(ChatMessage(role: .assistant, blocks: [.toolCall(toolCall)]))
+            state.localAddendum.append(ChatMessage(role: .assistant, blocks: [.toolCall(toolCall)]))
         }
         Task { await saveCurrentSession(in: window) }
     }
@@ -1085,6 +1096,7 @@ final class AppState {
                             if let state = sessionStates.removeValue(forKey: sessionKey) {
                                 sessionStates[resultEvent.sessionId] = state
                             }
+                            lastCommittedReloadKey.removeValue(forKey: sessionKey)
                             sessionKey = resultEvent.sessionId
                         }
                         let msgs = stateForSession(sessionKey).allMessages
@@ -1110,6 +1122,7 @@ final class AppState {
                             if let state = sessionStates.removeValue(forKey: oldKey) {
                                 sessionStates[sid] = state
                             }
+                            lastCommittedReloadKey.removeValue(forKey: oldKey)
                             sessionKey = sid
                             startFlushTimer(for: sid)
 
@@ -1167,7 +1180,7 @@ final class AppState {
 
                     if systemEvent.subtype == "compact_boundary" {
                         updateState(sessionKey) { state in
-                            state.committedMessages.append(ChatMessage(role: .assistant, content: "Previous conversation has been compacted", isCompactBoundary: true))
+                            state.localAddendum.append(ChatMessage(role: .assistant, content: "Previous conversation has been compacted", isCompactBoundary: true))
                         }
                     }
 
@@ -1209,6 +1222,7 @@ final class AppState {
                         if let state = sessionStates.removeValue(forKey: sessionKey) {
                             sessionStates[resultEvent.sessionId] = state
                         }
+                        lastCommittedReloadKey.removeValue(forKey: sessionKey)
                         sessionKey = resultEvent.sessionId
                     }
 
@@ -1329,7 +1343,7 @@ final class AppState {
                 if lastMsg.map({ $0.role == .assistant && $0.blocks.isEmpty }) == true {
                     let errorMsg = stderrOutput ?? "Response was interrupted"
                     updateState(sessionKey) { state in
-                        state.committedMessages.append(ChatMessage(role: .assistant, content: errorMsg, isError: true))
+                        state.localAddendum.append(ChatMessage(role: .assistant, content: errorMsg, isError: true))
                     }
                 }
 
@@ -1591,6 +1605,7 @@ final class AppState {
             allSessionSummaries.removeAll { $0.id == sid }
             window.removePendingPlaceholder(sid)
             sessionStates.removeValue(forKey: sid)
+            lastCommittedReloadKey.removeValue(forKey: sid)
             window.currentSessionId = nil
         }
     }
@@ -1980,6 +1995,7 @@ final class AppState {
             }
             if window.currentSessionId != outgoingId {
                 sessionStates.removeValue(forKey: outgoingId)
+                lastCommittedReloadKey.removeValue(forKey: outgoingId)
             }
         }
     }
@@ -2064,6 +2080,7 @@ final class AppState {
         window.sessionEffort = nil
         window.sessionPermissionMode = nil
         sessionStates.removeValue(forKey: window.newSessionKey)
+        lastCommittedReloadKey.removeValue(forKey: window.newSessionKey)
         window.inputText = window.draftTexts["new"] ?? ""
         window.messageQueue = window.draftQueues["new"] ?? []
         window.requestInputFocus = true
@@ -2158,6 +2175,7 @@ final class AppState {
         }
         allSessionSummaries.removeAll { $0.id == session.id }
         sessionStates.removeValue(forKey: session.id)
+        lastCommittedReloadKey.removeValue(forKey: session.id)
     }
 
     func deleteAllSessions(projectId: UUID? = nil, in window: WindowState) async {
@@ -2192,7 +2210,10 @@ final class AppState {
         }
 
         allSessionSummaries.removeAll { ids.contains($0.id) }
-        for id in ids { sessionStates.removeValue(forKey: id) }
+        for id in ids {
+            sessionStates.removeValue(forKey: id)
+            lastCommittedReloadKey.removeValue(forKey: id)
+        }
     }
 
     func selectSession(id: String, in window: WindowState) {
@@ -2333,24 +2354,32 @@ final class AppState {
     /// (tail holds the in-progress turn). Safe to call from any trigger.
     private func reloadCommittedFromDisk(sessionId: String, projectId: UUID, cwd: String) {
         let summary = summaryFor(sessionId: sessionId, projectId: projectId)
-        let lastSize = lastCommittedReloadSize[sessionId]
+        let lastKey = lastCommittedReloadKey[sessionId]
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
-            // Cheap stat check: skip the parse entirely when the jsonl hasn't grown.
             let url = await self.cliStore.directory(forCwd: cwd)
                 .appendingPathComponent("\(sessionId).jsonl")
-            let currentSize: UInt64? = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int)
-                .flatMap(UInt64.init(exactly:))
-            if let lastSize, let currentSize, currentSize <= lastSize { return }
+            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let currentSize: UInt64? = (attrs?[.size] as? Int).flatMap(UInt64.init(exactly:))
+            let currentMtime = attrs?[.modificationDate] as? Date
+
+            // Skip parse only when file is byte-for-byte unchanged (size AND mtime match).
+            // Any change — including shrink — triggers a fresh parse.
+            if let lastKey, let currentSize, let currentMtime,
+               ReloadCacheKey(size: currentSize, mtime: currentMtime) == lastKey {
+                return
+            }
 
             guard let full = await self.persistence.loadFullSession(summary: summary, cwd: cwd) else { return }
             let cleaned = await self.cleanLoadedMessages(full.messages)
             await MainActor.run {
                 guard var state = self.sessionStates[sessionId],
                       !state.isStreaming else { return }
-                if let currentSize { self.lastCommittedReloadSize[sessionId] = currentSize }
+                if let currentSize, let currentMtime {
+                    self.lastCommittedReloadKey[sessionId] = ReloadCacheKey(size: currentSize, mtime: currentMtime)
+                }
                 guard cleaned != state.committedMessages else { return }
                 state.committedMessages = cleaned
                 self.sessionStates[sessionId] = state
@@ -2502,7 +2531,7 @@ final class AppState {
     private func addErrorMessage(_ text: String, in window: WindowState) {
         let key = window.currentSessionId ?? window.newSessionKey
         let msg = ChatMessage(role: .assistant, content: text, isError: true)
-        updateState(key) { $0.committedMessages.append(msg) }
+        updateState(key) { $0.localAddendum.append(msg) }
     }
 
     // MARK: - Claude Settings Reader
