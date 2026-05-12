@@ -1926,24 +1926,21 @@ final class AppState {
             state.permissionMode = session.permissionMode
             if let msgs = loadedMessages {
                 state.committedMessages = cleanLoadedMessages(msgs)
-                sessionStates[session.id] = state
-            } else {
-                // Switch with an empty state first; actual messages are loaded in the background and injected later
-                sessionStates[session.id] = state
-                if let project = window.selectedProject {
-                    loadMessagesInBackground(projectId: project.id, sessionId: session.id, cwd: project.path)
-                }
             }
-        } else if sessionStates[session.id]?.allMessages.isEmpty == true,
-                  sessionStates[session.id]?.isStreaming != true,
-                  let project = window.selectedProject {
+            sessionStates[session.id] = state
+        } else {
             if var state = sessionStates[session.id] {
                 if state.model == nil { state.model = session.model }
                 if state.effort == nil { state.effort = session.effort }
                 if state.permissionMode == nil { state.permissionMode = session.permissionMode }
                 sessionStates[session.id] = state
             }
-            loadMessagesInBackground(projectId: project.id, sessionId: session.id, cwd: project.path)
+        }
+
+        // Always reload from disk — disk is the source of truth.
+        // reloadCommittedFromDisk is a no-op when the session is actively streaming.
+        if let project = window.selectedProject {
+            reloadCommittedFromDisk(sessionId: session.id, projectId: project.id, cwd: project.path)
         }
 
         if sessionStates[session.id]?.isStreaming == true {
@@ -2346,7 +2343,7 @@ final class AppState {
     }
 
     /// Load messages in the background and inject without blocking the main thread.
-    /// Does not overwrite if currently streaming or if messages already exist.
+    /// Does not overwrite if currently streaming.
     /// `cwd` is needed so we can route to the CLI's jsonl when origin is `.cliBacked`.
     private func loadMessagesInBackground(projectId: UUID, sessionId: String, cwd: String) {
         // Snapshot the summary while we're on MainActor so the detached task
