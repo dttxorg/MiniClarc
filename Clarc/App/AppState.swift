@@ -72,6 +72,11 @@ final class AppState {
     /// `internal` (not private) — read access required from WindowState / extensions
     var sessionStates: [String: SessionStreamState] = [:]
 
+    /// Last jsonl byte size seen by reloadCommittedFromDisk. Used as a cheap
+    /// short-circuit when the file hasn't grown — avoids the mmap+parse hot loop
+    /// triggered by the FS watcher during streaming.
+    private var lastCommittedReloadSize: [String: UInt64] = [:]
+
     // MARK: - Session Summaries (shared — lightweight metadata for all projects)
 
     var allSessionSummaries: [ChatSession.Summary] = []
@@ -2314,13 +2319,25 @@ final class AppState {
     /// (tail holds the in-progress turn). Safe to call from any trigger.
     private func reloadCommittedFromDisk(sessionId: String, projectId: UUID, cwd: String) {
         let summary = summaryFor(sessionId: sessionId, projectId: projectId)
+        let lastSize = lastCommittedReloadSize[sessionId]
+
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+
+            // Cheap stat check: skip the parse entirely when the jsonl hasn't grown.
+            let url = await self.cliStore.directory(forCwd: cwd)
+                .appendingPathComponent("\(sessionId).jsonl")
+            let currentSize: UInt64? = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int)
+                .flatMap(UInt64.init(exactly:))
+            if let lastSize, let currentSize, currentSize <= lastSize { return }
+
             guard let full = await self.persistence.loadFullSession(summary: summary, cwd: cwd) else { return }
             let cleaned = await self.cleanLoadedMessages(full.messages)
             await MainActor.run {
                 guard var state = self.sessionStates[sessionId],
                       !state.isStreaming else { return }
+                if let currentSize { self.lastCommittedReloadSize[sessionId] = currentSize }
+                guard cleaned != state.committedMessages else { return }
                 state.committedMessages = cleaned
                 self.sessionStates[sessionId] = state
             }
