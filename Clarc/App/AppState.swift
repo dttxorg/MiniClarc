@@ -946,6 +946,19 @@ final class AppState {
         sessionStates[key] = state
     }
 
+    /// Promote any in-flight `streamingTail.messages` into `committedMessages` (with
+    /// `isStreaming` cleared) and drop the tail. No-op when no tail is present.
+    private func promoteTailToCommitted(for key: String) {
+        guard var s = sessionStates[key], let tail = s.streamingTail else { return }
+        s.committedMessages += tail.messages.map { msg in
+            var m = msg
+            m.isStreaming = false
+            return m
+        }
+        s.streamingTail = nil
+        sessionStates[key] = s
+    }
+
     private func finalizeStreamSession(
         for sessionKey: String,
         extraMutations: ((inout SessionStreamState) -> Void)? = nil
@@ -1196,14 +1209,7 @@ final class AppState {
                     }
 
                     // Promote in-flight tail into committed before disk reload
-                    if var resultState = sessionStates[resultEvent.sessionId] {
-                        let tailMessages = resultState.streamingTail?.messages ?? []
-                        resultState.committedMessages += tailMessages.map { msg in
-                            var m = msg; m.isStreaming = false; return m
-                        }
-                        resultState.streamingTail = nil
-                        sessionStates[resultEvent.sessionId] = resultState
-                    }
+                    promoteTailToCommitted(for: resultEvent.sessionId)
 
                     let isFg = (window.currentSessionId ?? window.newSessionKey) == sessionKey
                     if isFg {
@@ -1298,14 +1304,7 @@ final class AppState {
                 logger.warning("[Stream:UI] isStreaming was still true at stream end — forcing cleanup")
                 finalizeStreamSession(for: sessionKey)
                 // Promote partial tail on forced cleanup
-                if var s = sessionStates[sessionKey] {
-                    let tailMessages = s.streamingTail?.messages ?? []
-                    s.committedMessages += tailMessages.map { msg in
-                        var m = msg; m.isStreaming = false; return m
-                    }
-                    s.streamingTail = nil
-                    sessionStates[sessionKey] = s
-                }
+                promoteTailToCommitted(for: sessionKey)
 
                 // If the last assistant message is invisible after cleanup (blocks=[] because
                 // all tool calls had empty/nil results), show an error bubble so the user
@@ -1328,14 +1327,7 @@ final class AppState {
                     logger.warning("[Stream:UI] stream \(streamId) ended — no active owner for session, forcing cleanup")
                     finalizeStreamSession(for: sessionKey)
                     // Promote partial tail on forced cleanup
-                    if var s = sessionStates[sessionKey] {
-                        let tailMessages = s.streamingTail?.messages ?? []
-                        s.committedMessages += tailMessages.map { msg in
-                            var m = msg; m.isStreaming = false; return m
-                        }
-                        s.streamingTail = nil
-                        sessionStates[sessionKey] = s
-                    }
+                    promoteTailToCommitted(for: sessionKey)
                     let msgs = stateForSession(sessionKey).allMessages
                     if !msgs.isEmpty {
                         await saveSession(sessionId: sessionKey, projectId: projectId, messages: msgs)
@@ -1533,14 +1525,7 @@ final class AppState {
         // on the MainActor while we await — does not call finalizeStreamSession and
         // incorrectly mark the cancelled message as isResponseComplete=true.
         // Promote partial tail on cancel
-        if var s = sessionStates[key] {
-            let tailMessages = s.streamingTail?.messages ?? []
-            s.committedMessages += tailMessages.map { msg in
-                var m = msg; m.isStreaming = false; return m
-            }
-            s.streamingTail = nil
-            sessionStates[key] = s
-        }
+        promoteTailToCommitted(for: key)
         sessionStates[key]?.isStreaming = false
         sessionStates[key]?.activeStreamId = nil
 
