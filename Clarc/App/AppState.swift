@@ -941,27 +941,31 @@ final class AppState {
             state.flushTask = nil
             state.isStreaming = false
             state.isThinking = false
-            state.needsNewMessage = false
             state.activeStreamId = nil
             state.streamTask = nil
-            state.activeToolId = nil
-            state.activeToolInputBuffer = ""
-            state.textDeltaBuffer = ""
-            state.pendingToolResults.removeAll()
+
+            if state.streamingTail != nil {
+                state.streamingTail!.needsNewMessage = false
+                state.streamingTail!.activeToolId = nil
+                state.streamingTail!.activeToolInputBuffer = ""
+                state.streamingTail!.textDeltaBuffer = ""
+                state.streamingTail!.pendingToolResults.removeAll()
+
+                if let idx = state.streamingTail!.messages.indices.reversed().first(where: {
+                    state.streamingTail!.messages[$0].role == .assistant && state.streamingTail!.messages[$0].isStreaming
+                }) {
+                    state.streamingTail!.messages[idx].isStreaming = false
+                    state.streamingTail!.messages[idx].isResponseComplete = true
+                    state.streamingTail!.messages[idx].finalizeToolCalls()
+                    if let start = state.streamingStartDate {
+                        state.streamingTail!.messages[idx].duration = Date().timeIntervalSince(start)
+                    }
+                    Self.stripNoOpText(at: idx, in: &state.streamingTail!.messages)
+                }
+            }
 
             extraMutations?(&state)
 
-            if let idx = state.messages.indices.reversed().first(where: {
-                state.messages[$0].role == .assistant && state.messages[$0].isStreaming
-            }) {
-                state.messages[idx].isStreaming = false
-                state.messages[idx].isResponseComplete = true
-                state.messages[idx].finalizeToolCalls()
-                if let start = state.streamingStartDate {
-                    state.messages[idx].duration = Date().timeIntervalSince(start)
-                }
-                Self.stripNoOpText(at: idx, in: &state.messages)
-            }
             state.streamingStartDate = nil
         }
     }
