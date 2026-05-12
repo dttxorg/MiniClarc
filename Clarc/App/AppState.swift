@@ -623,7 +623,7 @@ final class AppState {
 
     func editAndResend(messageId: UUID, newContent: String, in window: WindowState) async {
         let key = window.currentSessionId ?? window.newSessionKey
-        var snapshot = sessionStates[key]?.messages ?? []
+        var snapshot = sessionStates[key]?.allMessages ?? []
         guard let index = snapshot.firstIndex(where: { $0.id == messageId }),
               snapshot[index].role == .user else { return }
 
@@ -791,7 +791,7 @@ final class AppState {
 
         let key = window.currentSessionId ?? window.newSessionKey
         updateState(key) { state in
-            state.messages.append(ChatMessage(role: .user, content: terminal.title))
+            state.committedMessages.append(ChatMessage(role: .user, content: terminal.title))
             let result = exitCode == 0 ? "Done" : "exit code: \(exitCode)"
             let toolCall = ToolCall(
                 id: UUID().uuidString,
@@ -800,7 +800,7 @@ final class AppState {
                 result: result,
                 isError: exitCode != 0
             )
-            state.messages.append(ChatMessage(role: .assistant, blocks: [.toolCall(toolCall)]))
+            state.committedMessages.append(ChatMessage(role: .assistant, blocks: [.toolCall(toolCall)]))
         }
         Task { await saveCurrentSession(in: window) }
     }
@@ -848,12 +848,12 @@ final class AppState {
 
         // Apply initialMessages if provided
         if let initial = initialMessages {
-            updateState(sessionKey) { $0.messages = initial }
+            updateState(sessionKey) { $0.committedMessages = initial }
         }
 
         if !skipAppendingUserMessage {
             updateState(sessionKey) { state in
-                state.messages.append(ChatMessage(
+                state.committedMessages.append(ChatMessage(
                     role: .user,
                     content: displayText ?? prompt,
                     attachments: attachments
@@ -1043,7 +1043,7 @@ final class AppState {
                             }
                             sessionKey = resultEvent.sessionId
                         }
-                        let msgs = stateForSession(sessionKey).messages
+                        let msgs = stateForSession(sessionKey).allMessages
                         if !msgs.isEmpty {
                             await saveSession(sessionId: resultEvent.sessionId, projectId: projectId, messages: msgs)
                         }
@@ -1107,7 +1107,7 @@ final class AppState {
 
                             if !allSessionSummaries.contains(where: { $0.id == sid }),
                                let project = projects.first(where: { $0.id == projectId }) {
-                                let msgs = stateForSession(sessionKey).messages
+                                let msgs = stateForSession(sessionKey).allMessages
                                 let firstUserContent = msgs.first(where: { $0.role == .user })?.content
                                 let title: String
                                 if let content = firstUserContent {
@@ -1123,7 +1123,7 @@ final class AppState {
 
                     if systemEvent.subtype == "compact_boundary" {
                         updateState(sessionKey) { state in
-                            state.messages.append(ChatMessage(role: .assistant, content: "Previous conversation has been compacted", isCompactBoundary: true))
+                            state.committedMessages.append(ChatMessage(role: .assistant, content: "Previous conversation has been compacted", isCompactBoundary: true))
                         }
                     }
 
@@ -1202,7 +1202,7 @@ final class AppState {
                     await saveSession(
                         sessionId: resultEvent.sessionId,
                         projectId: projectId,
-                        messages: stateForSession(sessionKey).messages
+                        messages: stateForSession(sessionKey).allMessages
                     )
 
                     reloadCommittedFromDisk(sessionId: resultEvent.sessionId, projectId: projectId, cwd: cwd)
@@ -1220,7 +1220,7 @@ final class AppState {
 
                         if notificationsEnabled && !NSApp.isActive {
                             let title = allSessionSummaries.first(where: { $0.id == resultEvent.sessionId })?.title ?? "New Session"
-                            let firstSentence = stateForSession(sessionKey).messages
+                            let firstSentence = stateForSession(sessionKey).allMessages
                                 .last(where: { $0.role == .assistant && !$0.isError })
                                 .flatMap { msg -> String? in
                                     let text = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1299,7 +1299,7 @@ final class AppState {
                 if lastMsg.map({ $0.role == .assistant && $0.blocks.isEmpty }) == true {
                     let errorMsg = stderrOutput ?? "Response was interrupted"
                     updateState(sessionKey) { state in
-                        state.messages.append(ChatMessage(role: .assistant, content: errorMsg, isError: true))
+                        state.committedMessages.append(ChatMessage(role: .assistant, content: errorMsg, isError: true))
                     }
                 }
 
@@ -1543,18 +1543,18 @@ final class AppState {
             state.streamTask = nil
             state.streamingStartDate = nil
             // Drop the in-progress assistant bubble so it doesn't reappear on the next turn.
-            if let lastIndex = state.messages.indices.last,
-               state.messages[lastIndex].role == .assistant,
-               !state.messages[lastIndex].isError,
-               !state.messages[lastIndex].isCompactBoundary {
-                state.messages.remove(at: lastIndex)
+            if let lastIndex = state.committedMessages.indices.last,
+               state.committedMessages[lastIndex].role == .assistant,
+               !state.committedMessages[lastIndex].isError,
+               !state.committedMessages[lastIndex].isCompactBoundary {
+                state.committedMessages.remove(at: lastIndex)
             }
             // Restore the user message that triggered this stream into the input field.
-            if let lastIndex = state.messages.indices.last,
-               state.messages[lastIndex].role == .user,
-               !state.messages[lastIndex].isCompactBoundary {
-                let userText = state.messages[lastIndex].blocks.compactMap(\.text).joined()
-                state.messages.remove(at: lastIndex)
+            if let lastIndex = state.committedMessages.indices.last,
+               state.committedMessages[lastIndex].role == .user,
+               !state.committedMessages[lastIndex].isCompactBoundary {
+                let userText = state.committedMessages[lastIndex].blocks.compactMap(\.text).joined()
+                state.committedMessages.remove(at: lastIndex)
                 window.inputText = userText
             }
         }
@@ -1564,7 +1564,7 @@ final class AppState {
 
         // Save messages accumulated up to the point of cancellation to disk (prevent data loss)
         if let project = window.selectedProject {
-            let messages = stateForSession(key).messages
+            let messages = stateForSession(key).allMessages
             if !messages.isEmpty {
                 await saveSession(sessionId: key, projectId: project.id, messages: messages)
             }
@@ -1584,8 +1584,12 @@ final class AppState {
         let duration = Date().timeIntervalSince(start)
         updateState(key) { state in
             state.streamingStartDate = nil
-            if let idx = state.messages.indices.reversed().first(where: { state.messages[$0].role == .assistant }) {
-                state.messages[idx].duration = duration
+            if var tail = state.streamingTail,
+               let idx = tail.messages.indices.reversed().first(where: { tail.messages[$0].role == .assistant }) {
+                tail.messages[idx].duration = duration
+                state.streamingTail = tail
+            } else if let idx = state.committedMessages.indices.reversed().first(where: { state.committedMessages[$0].role == .assistant }) {
+                state.committedMessages[idx].duration = duration
             }
         }
     }
@@ -1616,16 +1620,30 @@ final class AppState {
             "answers": .object([:]),
         ])
         updateState(key) { state in
-            for i in state.messages.indices.reversed() {
-                guard let idx = state.messages[i].toolCallIndex(id: toolUseId),
-                      let toolInput = state.messages[i].blocks[idx].toolCall?.input else { continue }
-
+            // Tool call is in the streaming tail during an active session.
+            if var tail = state.streamingTail {
+                for i in tail.messages.indices.reversed() {
+                    guard let idx = tail.messages[i].toolCallIndex(id: toolUseId),
+                          let toolInput = tail.messages[i].blocks[idx].toolCall?.input else { continue }
+                    let questionText = AskUserQuestion(input: toolInput)?.questions.first?.question ?? "question"
+                    updatedInput = .object([
+                        "questions": toolInput["questions"] ?? .array([]),
+                        "answers": .object([questionText: .string(optionLabel)]),
+                    ])
+                    tail.messages[i].setToolResult(id: toolUseId, result: optionLabel, isError: false)
+                    state.streamingTail = tail
+                    return
+                }
+            }
+            for i in state.committedMessages.indices.reversed() {
+                guard let idx = state.committedMessages[i].toolCallIndex(id: toolUseId),
+                      let toolInput = state.committedMessages[i].blocks[idx].toolCall?.input else { continue }
                 let questionText = AskUserQuestion(input: toolInput)?.questions.first?.question ?? "question"
                 updatedInput = .object([
                     "questions": toolInput["questions"] ?? .array([]),
                     "answers": .object([questionText: .string(optionLabel)]),
                 ])
-                state.messages[i].setToolResult(id: toolUseId, result: optionLabel, isError: false)
+                state.committedMessages[i].setToolResult(id: toolUseId, result: optionLabel, isError: false)
                 return
             }
         }
@@ -1657,9 +1675,9 @@ final class AppState {
         if let currentId = window.currentSessionId,
            let currentProject = window.selectedProject,
            let state = sessionStates[currentId],
-           !state.messages.isEmpty {
+           !state.allMessages.isEmpty {
             let title = allSessionSummaries.first(where: { $0.id == currentId })?.title ?? "Session"
-            let session = ChatSession(id: currentId, projectId: currentProject.id, title: title, messages: state.messages, updatedAt: lastResponseDate(from: state.messages))
+            let session = ChatSession(id: currentId, projectId: currentProject.id, title: title, messages: state.allMessages, updatedAt: lastResponseDate(from: state.allMessages))
             Task {
                 do { try await self.persistence.saveSession(session) }
                 catch { self.logger.error("Failed to save current session before project switch: \(error.localizedDescription)") }
@@ -1884,7 +1902,7 @@ final class AppState {
             state.effort = session.effort
             state.permissionMode = session.permissionMode
             if let msgs = loadedMessages {
-                state.messages = cleanLoadedMessages(msgs)
+                state.committedMessages = cleanLoadedMessages(msgs)
                 sessionStates[session.id] = state
             } else {
                 // Switch with an empty state first; actual messages are loaded in the background and injected later
@@ -1893,7 +1911,7 @@ final class AppState {
                     loadMessagesInBackground(projectId: project.id, sessionId: session.id, cwd: project.path)
                 }
             }
-        } else if sessionStates[session.id]?.messages.isEmpty == true,
+        } else if sessionStates[session.id]?.allMessages.isEmpty == true,
                   sessionStates[session.id]?.isStreaming != true,
                   let project = window.selectedProject {
             if var state = sessionStates[session.id] {
@@ -1927,7 +1945,7 @@ final class AppState {
         guard let outgoingId,
               outgoingId != newId,
               !(sessionStates[outgoingId]?.isStreaming ?? false) else { return }
-        let outgoingMessages = sessionStates[outgoingId]?.messages ?? []
+        let outgoingMessages = sessionStates[outgoingId]?.allMessages ?? []
         Task { [weak self] in
             guard let self else { return }
             if !outgoingMessages.isEmpty, let project = window.selectedProject {
@@ -2319,8 +2337,8 @@ final class AppState {
             let cleaned = await self.cleanLoadedMessages(full.messages)
             await MainActor.run {
                 guard var state = self.sessionStates[sessionId] else { return }
-                guard !state.isStreaming, state.messages.isEmpty else { return }
-                state.messages = cleaned
+                guard !state.isStreaming else { return }
+                state.committedMessages = cleaned
                 if state.model == nil { state.model = full.model }
                 if state.effort == nil { state.effort = full.effort }
                 if state.permissionMode == nil { state.permissionMode = full.permissionMode }
@@ -2335,7 +2353,7 @@ final class AppState {
         await saveSession(
             sessionId: sessionId,
             projectId: project.id,
-            messages: stateForSession(sessionId).messages
+            messages: stateForSession(sessionId).allMessages
         )
     }
 
@@ -2425,7 +2443,7 @@ final class AppState {
         let streamId = UUID()
 
         updateState(sessionKey) { state in
-            state.messages.append(ChatMessage(role: .user, content: displayText, attachments: resolvedAttachments))
+            state.committedMessages.append(ChatMessage(role: .user, content: displayText, attachments: resolvedAttachments))
             state.isStreaming = true
             state.activeStreamId = streamId
             state.streamingStartDate = Date()
@@ -2473,7 +2491,7 @@ final class AppState {
     private func addErrorMessage(_ text: String, in window: WindowState) {
         let key = window.currentSessionId ?? window.newSessionKey
         let msg = ChatMessage(role: .assistant, content: text, isError: true)
-        updateState(key) { $0.messages.append(msg) }
+        updateState(key) { $0.committedMessages.append(msg) }
     }
 
     // MARK: - Claude Settings Reader
