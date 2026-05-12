@@ -865,6 +865,7 @@ final class AppState {
             state.isStreaming = true
             state.activeStreamId = streamId
             state.streamingStartDate = Date()
+            state.streamingTail = StreamingTail()
         }
         await permission.refreshRunToken()
 
@@ -1175,6 +1176,16 @@ final class AppState {
                         }
                     }
 
+                    // Promote in-flight tail into committed before disk reload
+                    if var resultState = sessionStates[resultEvent.sessionId] {
+                        let tailMessages = resultState.streamingTail?.messages ?? []
+                        resultState.committedMessages += tailMessages.map { msg in
+                            var m = msg; m.isStreaming = false; return m
+                        }
+                        resultState.streamingTail = nil
+                        sessionStates[resultEvent.sessionId] = resultState
+                    }
+
                     let isFg = (window.currentSessionId ?? window.newSessionKey) == sessionKey
                     if isFg {
                         window.currentSessionId = resultEvent.sessionId
@@ -1267,11 +1278,20 @@ final class AppState {
             if stillStreaming && isStillOwner {
                 logger.warning("[Stream:UI] isStreaming was still true at stream end — forcing cleanup")
                 finalizeStreamSession(for: sessionKey)
+                // Promote partial tail on forced cleanup
+                if var s = sessionStates[sessionKey] {
+                    let tailMessages = s.streamingTail?.messages ?? []
+                    s.committedMessages += tailMessages.map { msg in
+                        var m = msg; m.isStreaming = false; return m
+                    }
+                    s.streamingTail = nil
+                    sessionStates[sessionKey] = s
+                }
 
                 // If the last assistant message is invisible after cleanup (blocks=[] because
                 // all tool calls had empty/nil results), show an error bubble so the user
                 // understands what happened rather than seeing no response at all.
-                let lastMsg = stateForSession(sessionKey).messages.last
+                let lastMsg = stateForSession(sessionKey).allMessages.last
                 if lastMsg.map({ $0.role == .assistant && $0.blocks.isEmpty }) == true {
                     let errorMsg = stderrOutput ?? "Response was interrupted"
                     updateState(sessionKey) { state in
@@ -1279,7 +1299,7 @@ final class AppState {
                     }
                 }
 
-                let msgs = stateForSession(sessionKey).messages
+                let msgs = stateForSession(sessionKey).allMessages
                 if !msgs.isEmpty {
                     await saveSession(sessionId: sessionKey, projectId: projectId, messages: msgs)
                 }
@@ -1288,7 +1308,16 @@ final class AppState {
                 if currentOwner == nil {
                     logger.warning("[Stream:UI] stream \(streamId) ended — no active owner for session, forcing cleanup")
                     finalizeStreamSession(for: sessionKey)
-                    let msgs = stateForSession(sessionKey).messages
+                    // Promote partial tail on forced cleanup
+                    if var s = sessionStates[sessionKey] {
+                        let tailMessages = s.streamingTail?.messages ?? []
+                        s.committedMessages += tailMessages.map { msg in
+                            var m = msg; m.isStreaming = false; return m
+                        }
+                        s.streamingTail = nil
+                        sessionStates[sessionKey] = s
+                    }
+                    let msgs = stateForSession(sessionKey).allMessages
                     if !msgs.isEmpty {
                         await saveSession(sessionId: sessionKey, projectId: projectId, messages: msgs)
                     }
@@ -1484,6 +1513,15 @@ final class AppState {
         // Set isStreaming=false before suspending so that processStream — which may run
         // on the MainActor while we await — does not call finalizeStreamSession and
         // incorrectly mark the cancelled message as isResponseComplete=true.
+        // Promote partial tail on cancel
+        if var s = sessionStates[key] {
+            let tailMessages = s.streamingTail?.messages ?? []
+            s.committedMessages += tailMessages.map { msg in
+                var m = msg; m.isStreaming = false; return m
+            }
+            s.streamingTail = nil
+            sessionStates[key] = s
+        }
         sessionStates[key]?.isStreaming = false
         sessionStates[key]?.activeStreamId = nil
 
@@ -1497,13 +1535,8 @@ final class AppState {
         updateState(key) { state in
             state.isStreaming = false
             state.isThinking = false
-            state.needsNewMessage = false
             state.activeStreamId = nil
             state.streamTask = nil
-            state.activeToolId = nil
-            state.activeToolInputBuffer = ""
-            state.textDeltaBuffer = ""
-            state.pendingToolResults.removeAll()
             state.streamingStartDate = nil
             // Drop the in-progress assistant bubble so it doesn't reappear on the next turn.
             if let lastIndex = state.messages.indices.last,
@@ -2415,6 +2448,7 @@ final class AppState {
             state.isStreaming = true
             state.activeStreamId = streamId
             state.streamingStartDate = Date()
+            state.streamingTail = StreamingTail()
         }
 
         await permission.refreshRunToken()
