@@ -222,6 +222,11 @@ actor PermissionServer {
 
     /// Determines whether the request should be auto-approved. Returns a reason string if approved, or nil otherwise.
     private func autoApproveReason(for req: HookRequestBody) async -> String? {
+        // AskUserQuestion always requires an actual user answer (delivered via updatedInput);
+        // auto-approving it would let the CLI proceed with no answers and emit a fallback
+        // "Answer questions?" error result.
+        if req.toolName == "AskUserQuestion" { return nil }
+
         if let sid = req.sessionId,
            sessionToolAllows.contains(Self.sessionToolKey(sid: sid, tool: req.toolName)) {
             return "Tool allowed for session by user"
@@ -256,13 +261,22 @@ actor PermissionServer {
     // MARK: - Hook Settings
 
     /// Generate the hook settings JSON that should be passed to `claude --settings`.
-    func generateHookSettings() -> String {
+    ///
+    /// In `bypassPermissions` mode the user wants to skip permission modals for tool
+    /// execution, but AskUserQuestion still requires real user input — without a hook,
+    /// the CLI emits a fallback "Answer questions?" error result and pushes on. So we
+    /// always register a hook; the matcher just narrows to AskUserQuestion-only when
+    /// permissions are bypassed.
+    func generateHookSettings(permissionMode: PermissionMode) -> String {
         let url = "http://127.0.0.1:\(port)/hook/pre-tool-use/\(appSecret)/\(runToken)"
+        let matcher: String = permissionMode.skipsHookPipeline
+            ? "^AskUserQuestion$"
+            : "^(Bash|Edit|Write|MultiEdit|AskUserQuestion|mcp__.*)$"
         let settings: [String: Any] = [
             "hooks": [
                 "PreToolUse": [
                     [
-                        "matcher": "^(Bash|Edit|Write|MultiEdit|AskUserQuestion|mcp__.*)$",
+                        "matcher": matcher,
                         "hooks": [
                             [
                                 "type": "http",
@@ -282,8 +296,8 @@ actor PermissionServer {
     }
 
     /// Write hook settings to a temporary file and return its path.
-    func writeHookSettingsFile() throws -> String {
-        let json = generateHookSettings()
+    func writeHookSettingsFile(permissionMode: PermissionMode) throws -> String {
+        let json = generateHookSettings(permissionMode: permissionMode)
         let tempDir = FileManager.default.temporaryDirectory
         let filePath = tempDir.appendingPathComponent("claudework-hooks-\(UUID().uuidString).json")
         try json.write(to: filePath, atomically: true, encoding: .utf8)

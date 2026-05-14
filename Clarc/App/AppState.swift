@@ -913,13 +913,13 @@ final class AppState {
         await permission.refreshRunToken()
 
         let currentPermissionMode = window.sessionPermissionMode ?? permissionMode
+        // Always register a hook file — even in bypassPermissions mode, AskUserQuestion
+        // needs the hook to deliver the user's answer. The matcher narrows accordingly.
         var hookSettingsPath: String?
-        if !currentPermissionMode.skipsHookPipeline {
-            do {
-                hookSettingsPath = try await permission.writeHookSettingsFile()
-            } catch {
-                logger.error("Failed to write hook settings: \(error.localizedDescription)")
-            }
+        do {
+            hookSettingsPath = try await permission.writeHookSettingsFile(permissionMode: currentPermissionMode)
+        } catch {
+            logger.error("Failed to write hook settings: \(error.localizedDescription)")
         }
 
         // Resume already has the sid; new sessions register on first system event.
@@ -2496,11 +2496,10 @@ final class AppState {
         await permission.refreshRunToken()
 
         let currentPermissionMode = sessionStates[sessionKey]?.permissionMode ?? permissionMode
+        // Always register the hook file: bypassPermissions still needs it for AskUserQuestion.
         var hookSettingsPath: String?
-        if !currentPermissionMode.skipsHookPipeline {
-            do { hookSettingsPath = try await permission.writeHookSettingsFile() }
-            catch { logger.error("Failed to write hook settings for background queue: \(error.localizedDescription)") }
-        }
+        do { hookSettingsPath = try await permission.writeHookSettingsFile(permissionMode: currentPermissionMode) }
+        catch { logger.error("Failed to write hook settings for background queue: \(error.localizedDescription)") }
 
         await permission.registerSession(sid: sessionKey, projectKey: cwd, mode: currentPermissionMode)
 
