@@ -334,5 +334,25 @@
         type="application/octet-stream"
         sparkle:edSignature="NQ1mzCs8WpjmY6RttGqZXrFo8roFCsL+sBS6krB1kZO3orHCBlyXSaDqzW6p4xhtQEex0GOWF7n/qHxCieSWDg==" />
     </item>
+    <item>
+      <title>Clarc v1.3.0</title>
+      <sparkle:version>26</sparkle:version>
+      <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 28 May 2026 07:46:00 +0000</pubDate>
+      <description><![CDATA[
+<h3>Added</h3>
+<ul>
+  <li>Chat: Claude's reasoning now renders as an expandable thinking trace. Each turn's thinking is collapsed by default and can be opened inline to see how the response was reached.</li>
+  <li>Chat: A stop button now appears in the composer while Claude is responding, so you can cancel an in-progress response with a single click instead of a keyboard shortcut.</li>
+  <li>Chat: Fork a conversation from any message. Hovering an assistant message reveals a branch button that copies the conversation up to that point into a fresh session — the original is left untouched, and the branch keeps full prior context when resumed.</li>
+</ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/ttnear/Clarc/releases/download/v1.3.0/Clarc-1.3.0.zip"
+        length="6361623"
+        type="application/octet-stream"
+        sparkle:edSignature="/DO+UO7+Y8sJqh0vWdZ4pNwKQF9f6aEHsjFkHfalvmfRhKadzAiBfmqpsVivMp+sy3wR9O34bO/iQiaiiW99DA==" />
+    </item>
   </channel>
 </rss>
