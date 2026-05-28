@@ -6,16 +6,72 @@ public struct MessageBlock: Identifiable, Codable, Sendable, Equatable {
     public let id: String
     public var text: String?
     public var toolCall: ToolCall?
+    public var thinking: String?
+    public var thinkingDuration: TimeInterval?
+    public var isThinkingRedacted: Bool
 
     public var isText: Bool { text != nil }
     public var isToolCall: Bool { toolCall != nil }
+    public var isThinking: Bool { thinking != nil || isThinkingRedacted }
+
+    public init(
+        id: String,
+        text: String? = nil,
+        toolCall: ToolCall? = nil,
+        thinking: String? = nil,
+        thinkingDuration: TimeInterval? = nil,
+        isThinkingRedacted: Bool = false
+    ) {
+        self.id = id
+        self.text = text
+        self.toolCall = toolCall
+        self.thinking = thinking
+        self.thinkingDuration = thinkingDuration
+        self.isThinkingRedacted = isThinkingRedacted
+    }
 
     public static func text(_ text: String, id: String = UUID().uuidString) -> MessageBlock {
-        MessageBlock(id: id, text: text, toolCall: nil)
+        MessageBlock(id: id, text: text)
     }
 
     public static func toolCall(_ toolCall: ToolCall) -> MessageBlock {
-        MessageBlock(id: toolCall.id, text: nil, toolCall: toolCall)
+        MessageBlock(id: toolCall.id, toolCall: toolCall)
+    }
+
+    public static func thinking(
+        _ thinking: String,
+        duration: TimeInterval? = nil,
+        id: String = UUID().uuidString
+    ) -> MessageBlock {
+        MessageBlock(id: id, thinking: thinking, thinkingDuration: duration)
+    }
+
+    public static func redactedThinking(id: String = UUID().uuidString) -> MessageBlock {
+        MessageBlock(id: id, isThinkingRedacted: true)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, text, toolCall, thinking, thinkingDuration, isThinkingRedacted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        toolCall = try c.decodeIfPresent(ToolCall.self, forKey: .toolCall)
+        thinking = try c.decodeIfPresent(String.self, forKey: .thinking)
+        thinkingDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .thinkingDuration)
+        isThinkingRedacted = try c.decodeIfPresent(Bool.self, forKey: .isThinkingRedacted) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(toolCall, forKey: .toolCall)
+        try c.encodeIfPresent(thinking, forKey: .thinking)
+        try c.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
+        if isThinkingRedacted { try c.encode(true, forKey: .isThinkingRedacted) }
     }
 }
 
@@ -144,6 +200,24 @@ public struct ChatMessage: Identifiable, Codable, Sendable, Equatable {
 
     public mutating func appendToolCall(_ toolCall: ToolCall) {
         blocks.append(.toolCall(toolCall))
+    }
+
+    public mutating func appendThinkingDelta(_ text: String, blockId: String) {
+        if let lastIdx = blocks.indices.last,
+           blocks[lastIdx].isThinking,
+           blocks[lastIdx].id == blockId {
+            blocks[lastIdx].thinking = (blocks[lastIdx].thinking ?? "") + text
+        } else {
+            blocks.append(.thinking(text, id: blockId))
+        }
+    }
+
+    public mutating func finalizeThinking(blockId: String, duration: TimeInterval?) {
+        guard let idx = blocks.lastIndex(where: { $0.id == blockId }) else { return }
+        blocks[idx].thinkingDuration = duration
+        if (blocks[idx].thinking?.isEmpty ?? true) && !blocks[idx].isThinkingRedacted {
+            blocks.remove(at: idx)
+        }
     }
 
     public func toolCallIndex(id: String) -> Int? {

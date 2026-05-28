@@ -58,6 +58,7 @@ struct MessageBubble: View {
                                 // Other non-transient tools: only show when there is a result or error (prevents empty tool bubbles)
                                 return toolCall.result != nil || toolCall.isError
                             }
+                            if block.isThinking { return true }
                             return false
                         }
                     )
@@ -77,6 +78,12 @@ struct MessageBubble: View {
                             } else {
                                 ToolResultView(toolCall: toolCall, isMessageStreaming: message.isStreaming)
                             }
+                        }
+                        if block.isThinking {
+                            ThinkingBlockView(
+                                block: block,
+                                isMessageStreaming: message.isStreaming
+                            )
                         }
                     }
                 }
@@ -237,8 +244,10 @@ struct MessageBubble: View {
     // MARK: - Assistant Text Bubble
 
     private func assistantTextBubble(text: String, blockId: String, hasHiddenTools: Bool = false) -> some View {
-        let isLastBlock = message.blocks.last?.isText == true
-            && message.blocks.last?.text == text
+        // "Last block" for cursor purposes means the last TEXT block — a trailing
+        // thinking block (rare but possible) must not strip the streaming cursor.
+        let lastText = message.blocks.last(where: \.isText)
+        let isLastBlock = lastText?.id == blockId && lastText?.text == text
 
         return HStack(alignment: .bottom, spacing: 0) {
             if message.isStreaming && isLastBlock {

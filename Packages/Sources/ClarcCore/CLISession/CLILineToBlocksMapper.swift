@@ -116,14 +116,18 @@ public enum CLILineToBlocksMapper {
                 blocks.append(.text(t))
             case .toolUse(let id, let name, let input):
                 blocks.append(.toolCall(ToolCall(id: id, name: name, input: input)))
+            case .thinking(let t):
+                guard !t.isEmpty else { continue }
+                blocks.append(.thinking(t))
+            case .redactedThinking:
+                blocks.append(.redactedThinking())
             case .skip:
                 continue
             }
         }
 
-        // Empty assistant turn (e.g. only a thinking block) — collapse into a
-        // continuation of the previous assistant message rather than adding an
-        // empty bubble.
+        // Empty assistant turn — collapse into a continuation of the previous
+        // assistant message rather than adding an empty bubble.
         guard !blocks.isEmpty else { return }
 
         // If the previous assistant turn ended with an unresolved tool_use that

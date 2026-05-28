@@ -63,6 +63,9 @@ struct StreamingTail {
     var needsNewMessage: Bool = false
     var activeToolId: String?
     var activeToolInputBuffer: String = ""
+    var activeThinkingId: String?
+    var thinkingDeltaBuffer: String = ""
+    var thinkingStartDate: Date?
 }
 
 @Observable
@@ -1006,6 +1009,9 @@ final class AppState {
                 state.streamingTail!.activeToolInputBuffer = ""
                 state.streamingTail!.textDeltaBuffer = ""
                 state.streamingTail!.pendingToolResults.removeAll()
+                state.streamingTail!.activeThinkingId = nil
+                state.streamingTail!.thinkingDeltaBuffer = ""
+                state.streamingTail!.thinkingStartDate = nil
 
                 if let idx = state.streamingTail!.messages.indices.reversed().first(where: {
                     state.streamingTail!.messages[$0].role == .assistant && state.streamingTail!.messages[$0].isStreaming
@@ -1194,7 +1200,7 @@ final class AppState {
                         let allMsgs = state.allMessages
                         let afterLastUser = (allMsgs.lastIndex(where: { $0.role == .user }).map { $0 + 1 }) ?? 0
                         let hasStreamedText = allMsgs.suffix(from: afterLastUser).contains {
-                            $0.role == .assistant && $0.blocks.contains(where: \.isText)
+                            $0.role == .assistant && $0.blocks.contains(where: { $0.isText || $0.isThinking })
                         }
                         guard !hasStreamedText else { return }
                         for block in assistantMessage.content {
@@ -1390,7 +1396,33 @@ final class AppState {
         sessionStates[sessionKey]?.flushTask = nil
     }
 
+    /// Flush the in-flight thinking-delta buffer into its MessageBlock so the UI
+    /// reflects the latest thinking text. Called from the 50ms timer (via
+    /// flushPendingUpdates) and on content_block_stop.
+    private func flushPendingThinking(for key: String) {
+        guard var state = sessionStates[key],
+              var tail = state.streamingTail,
+              let thinkingId = tail.activeThinkingId,
+              !tail.thinkingDeltaBuffer.isEmpty else { return }
+
+        let delta = tail.thinkingDeltaBuffer
+        tail.thinkingDeltaBuffer = ""
+
+        if let idx = tail.messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
+            tail.messages[idx].appendThinkingDelta(delta, blockId: thinkingId)
+        } else {
+            var msg = ChatMessage(role: .assistant, isStreaming: true)
+            msg.appendThinkingDelta(delta, blockId: thinkingId)
+            tail.messages.append(msg)
+        }
+
+        state.streamingTail = tail
+        sessionStates[key] = state
+    }
+
     private func flushPendingUpdates(for key: String) {
+        flushPendingThinking(for: key)
+
         guard var state = sessionStates[key] else { return }
         guard var tail = state.streamingTail else { return }
 
@@ -1493,8 +1525,35 @@ final class AppState {
                     state.streamingTail!.activeToolId = nil
                     state.streamingTail!.activeToolInputBuffer = ""
                 }
-            } else if blockType == "thinking" {
-                updateState(sessionKey) { $0.isThinking = true }
+            } else if blockType == "thinking" || blockType == "redacted_thinking" {
+                // Flush any pending text first so thinking blocks land in order.
+                flushPendingUpdates(for: sessionKey)
+                let thinkingId = (contentBlock["id"] as? String) ?? UUID().uuidString
+                updateState(sessionKey) { state in
+                    state.streamingTail!.activeToolId = nil
+                    state.streamingTail!.activeToolInputBuffer = ""
+                    state.isThinking = true
+                    // needsNewMessage: opening a new Claude turn after a tool result.
+                    if state.streamingTail!.needsNewMessage {
+                        if let idx = state.streamingTail!.messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
+                            state.streamingTail!.messages[idx].isStreaming = false
+                            state.streamingTail!.messages[idx].finalizeToolCalls()
+                            Self.stripNoOpText(at: idx, in: &state.streamingTail!.messages)
+                        }
+                        state.streamingTail!.messages.append(ChatMessage(role: .assistant, isStreaming: true))
+                        state.streamingTail!.needsNewMessage = false
+                    } else if state.streamingTail!.messages.last?.role != .assistant || !(state.streamingTail!.messages.last?.isStreaming ?? false) {
+                        state.streamingTail!.messages.append(ChatMessage(role: .assistant, isStreaming: true))
+                    }
+                    state.streamingTail!.activeThinkingId = thinkingId
+                    state.streamingTail!.thinkingDeltaBuffer = ""
+                    state.streamingTail!.thinkingStartDate = Date()
+                    if blockType == "redacted_thinking",
+                       let lastIndex = state.streamingTail!.messages.indices.last,
+                       state.streamingTail!.messages[lastIndex].role == .assistant {
+                        state.streamingTail!.messages[lastIndex].blocks.append(.redactedThinking(id: thinkingId))
+                    }
+                }
             }
 
         case "content_block_delta":
@@ -1510,13 +1569,32 @@ final class AppState {
                 updateState(sessionKey) { state in
                     state.streamingTail!.activeToolInputBuffer += partial
                 }
-            } else if deltaType == "thinking_delta" {
-                updateState(sessionKey) { $0.isThinking = true }
+            } else if deltaType == "thinking_delta", let text = delta["thinking"] as? String {
+                updateState(sessionKey) { state in
+                    state.isThinking = true
+                    state.streamingTail!.thinkingDeltaBuffer += text
+                }
+            } else if deltaType == "signature_delta" {
+                // Cryptographic signature for the thinking block — opaque, never displayed.
+                return
             }
 
         case "content_block_stop":
-            // Finalize tool_use input — parse the accumulated JSON and apply to the tool call
+            // Finalize whichever block just closed — thinking or tool_use.
+            flushPendingThinking(for: sessionKey)
             updateState(sessionKey) { state in
+                if let thinkingId = state.streamingTail!.activeThinkingId {
+                    let duration = state.streamingTail!.thinkingStartDate.map { Date().timeIntervalSince($0) }
+                    if let msgIdx = state.streamingTail!.messages.lastIndex(where: { $0.role == .assistant && $0.isStreaming }) {
+                        state.streamingTail!.messages[msgIdx].finalizeThinking(blockId: thinkingId, duration: duration)
+                    }
+                    state.streamingTail!.activeThinkingId = nil
+                    state.streamingTail!.thinkingStartDate = nil
+                    state.streamingTail!.thinkingDeltaBuffer = ""
+                    state.isThinking = false
+                    return
+                }
+
                 guard let toolId = state.streamingTail!.activeToolId, !state.streamingTail!.activeToolInputBuffer.isEmpty else {
                     state.streamingTail!.activeToolId = nil
                     return

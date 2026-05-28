@@ -174,18 +174,20 @@ public struct CLIAssistantMessage: Decodable, Sendable {
     }
 }
 
-/// We deliberately drop `thinking` blocks at decode time — they can be tens of
-/// KB of base64-ish signature data and bloat memory. We don't render them, so
-/// they don't reach `MessageBlock`.
+/// We preserve `thinking` text so the UI can render an expandable trace, but
+/// drop the opaque `signature` field — it's tens of KB of base64 that the UI
+/// never displays.
 public enum AssistantContentPart: Sendable {
     case text(String)
     case toolUse(id: String, name: String, input: [String: JSONValue])
+    case thinking(String)
+    case redactedThinking
     case skip
 }
 
 extension AssistantContentPart: Decodable {
     private enum Keys: String, CodingKey {
-        case type, text, id, name, input
+        case type, text, id, name, input, thinking
     }
 
     public init(from decoder: Decoder) throws {
@@ -199,8 +201,12 @@ extension AssistantContentPart: Decodable {
             let name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
             let input = (try? c.decode([String: JSONValue].self, forKey: .input)) ?? [:]
             self = .toolUse(id: id, name: name, input: input)
+        case "thinking":
+            self = .thinking((try? c.decode(String.self, forKey: .thinking)) ?? "")
+        case "redacted_thinking":
+            self = .redactedThinking
         default:
-            // thinking, server_tool_use, redacted_thinking, ...
+            // server_tool_use and other unknown types.
             self = .skip
         }
     }
