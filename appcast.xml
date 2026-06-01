@@ -335,6 +335,25 @@
         sparkle:edSignature="NQ1mzCs8WpjmY6RttGqZXrFo8roFCsL+sBS6krB1kZO3orHCBlyXSaDqzW6p4xhtQEex0GOWF7n/qHxCieSWDg==" />
     </item>
     <item>
+      <title>Clarc v1.3.1</title>
+      <sparkle:version>27</sparkle:version>
+      <sparkle:shortVersionString>1.3.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Sun, 01 Jun 2026 00:00:00 +0000</pubDate>
+      <description><![CDATA[
+<h3>Fixed</h3>
+<ul>
+  <li>History: Duplicate session entries that appeared in the sidebar while a response was streaming are now gone. They were caused by hook lifecycle events being mistaken for the conversation's session id.</li>
+</ul>
+      ]]></description>
+      <enclosure
+        url="https://github.com/ttnear/Clarc/releases/download/v1.3.1/Clarc-1.3.1.zip"
+        length="6306283"
+        type="application/octet-stream"
+        sparkle:edSignature="a0Zs7uFwptdUSbC0Rzjl8vxRmVv1GfpbWFlk4pEz5XpcmTrv7cKXYaPRxYHGmBl3/NrplMg+XNlR716NEjYTAQ==" />
+    </item>
+
+    <item>
       <title>Clarc v1.3.0</title>
       <sparkle:version>26</sparkle:version>
       <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
