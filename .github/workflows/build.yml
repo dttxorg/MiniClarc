@@ -1,0 +1,53 @@
+name: build
+
+on:
+  push:
+    branches: [i18n-zh-Hans-and-shell-env]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode (latest stable)
+        run: |
+          ls -d /Applications/Xcode_*.app | head -1
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | head -1)/Contents/Developer"
+          xcodebuild -version
+
+      - name: Build (Release, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Clarc.xcodeproj \
+            -scheme Clarc \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tail -50
+
+      - name: Package .app
+        run: |
+          APP="build/Build/Products/Release/Clarc.app"
+          test -d "$APP" || (echo "Clarc.app not found"; ls -la build/Build/Products/Release/; exit 1)
+          # Verify zh-Hans.lproj made it into the bundle
+          test -d "$APP/Contents/Resources/zh-Hans.lproj" || (echo "zh-Hans.lproj missing from bundle!"; exit 1)
+          cd build/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent Clarc.app Clarc.zip
+          shasum -a 256 Clarc.zip | tee Clarc.zip.sha256
+
+      - name: Upload .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clarc-app
+          path: build/Build/Products/Release/Clarc.zip
+          if-no-files-found: error
+          retention-days: 14
