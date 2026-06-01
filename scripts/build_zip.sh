@@ -101,8 +101,13 @@ echo ""
 rm -f "$NOTARIZE_ZIP"
 
 # ── 4. 최종 ZIP ──────────────────────────────
+# --norsrc --noextattr --noqtn: do not serialize extended attributes
+# (e.g. com.apple.provenance on Sequoia) as AppleDouble entries. Otherwise
+# plain `unzip` (used by Homebrew Cask, Info-ZIP) materializes ._* files
+# inside Sparkle.framework, breaking the embedded framework's code seal and
+# causing Gatekeeper to reject the app. See issue #14.
 echo "🗜  ZIP 생성 중..."
-ditto -c -k --keepParent "$APP_PATH" "$BUILD_DIR/$ZIP_NAME"
+ditto -c -k --keepParent --norsrc --noextattr --noqtn "$APP_PATH" "$BUILD_DIR/$ZIP_NAME"
 
 ZIP_SIZE=$(du -sh "$BUILD_DIR/$ZIP_NAME" | cut -f1)
 
