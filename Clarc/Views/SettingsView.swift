@@ -63,6 +63,8 @@ struct GeneralSettingsTab: View {
     @Binding var showUserManual: Bool
     @State private var showSkillMarket = false
     @State private var showThemePicker = false
+    @State private var testSheetOpen = false
+    @State private var viewModel = UsageSettingsViewModel()
 
     var body: some View {
         @Bindable var appState = appState
@@ -217,105 +219,157 @@ struct GeneralSettingsTab: View {
 
     // MARK: - Usage Endpoint Section
 
-    /// Settings for the rate-limit / usage data source. Default is the
-    /// Anthropic oauth/usage endpoint, fetched with the user's OAuth token.
-    /// Power users can point at a custom URL whose response is JSON
-    /// compatible with Anthropic's payload schema.
+    /// Settings for the rate-limit / usage data source. The user picks
+    /// a provider (Anthropic / MiniMax / OpenAI / Custom), and the
+    /// endpoint / token / path fields adapt to that choice. Test Endpoint
+    /// triggers a one-shot probe and shows the result in a sheet.
     private var usageEndpointSection: some View {
         @Bindable var appState = appState
-        let isCustom = (appState.usageEndpoint?.isEmpty == false)
 
         return VStack(alignment: .leading, spacing: 12) {
             Text(LocalizedStringKey("Usage Endpoint"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Toggle(isOn: Binding(
-                get: { isCustom },
-                set: { newValue in
-                    if newValue {
-                        // Pre-fill with a placeholder if the user enables
-                        // the toggle without typing a URL yet.
-                        if appState.usageEndpoint == nil {
-                            appState.usageEndpoint = "https://"
-                        }
-                    } else {
-                        // Disable: clear the URL (token is left as-is so
-                        // re-enabling doesn't lose the user's secret).
-                        appState.usageEndpoint = ""
-                    }
+            Picker(LocalizedStringKey("Provider"), selection: $appState.usageProvider) {
+                ForEach(UsageProvider.allCases, id: \.self) { p in
+                    Text(p.displayName).tag(p)
                 }
-            )) {
-                Text("Use custom usage endpoint")
             }
-            .toggleStyle(.switch)
+            .pickerStyle(.menu)
             .fixedSize()
-
-            if isCustom {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey("Endpoint URL"))
-                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                        .foregroundStyle(.secondary)
-                    TextField(
-                        "https://your-server/usage",
-                        text: Binding(
-                            get: { appState.usageEndpoint ?? "" },
-                            set: { appState.usageEndpoint = $0 }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey("Bearer token (optional)"))
-                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                        .foregroundStyle(.secondary)
-                    SecureField(
-                        "sk-...",
-                        text: Binding(
-                            get: { appState.usageEndpointBearerToken ?? "" },
-                            set: { appState.usageEndpointBearerToken = $0 }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey("5h utilization JSON path"))
-                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                        .foregroundStyle(.secondary)
-                    TextField(
-                        "five_hour.utilization",
-                        text: Binding(
-                            get: { appState.usageEndpointFiveHourPath ?? "five_hour.utilization" },
-                            set: { appState.usageEndpointFiveHourPath = $0 }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey("7d utilization JSON path"))
-                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                        .foregroundStyle(.secondary)
-                    TextField(
-                        "seven_day.utilization",
-                        text: Binding(
-                            get: { appState.usageEndpointSevenDayPath ?? "seven_day.utilization" },
-                            set: { appState.usageEndpointSevenDayPath = $0 }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
-                }
+            .onChange(of: appState.usageProvider) { _, newValue in
+                applyProviderDefaults(newValue, appState: appState)
             }
 
-            Text(LocalizedStringKey("usage.endpoint.desc"))
+            Text(LocalizedStringKey("usage.provider.desc"))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            providerFields(for: appState.usageProvider)
+        }
+        .sheet(isPresented: $testSheetOpen) {
+            TestEndpointSheet(
+                viewModel: viewModel,
+                appState: appState,
+                isPresented: $testSheetOpen
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func providerFields(for provider: UsageProvider) -> some View {
+        @Bindable var appState = appState
+
+        let isAnthropic = (provider == .anthropic)
+
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LocalizedStringKey("Endpoint URL"))
+                    .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField(
+                    provider.endpointPlaceholder,
+                    text: Binding(
+                        get: { appState.usageEndpoint ?? provider.endpointPlaceholder },
+                        set: { appState.usageEndpoint = $0 }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                .disabled(isAnthropic)
+                .opacity(isAnthropic ? 0.55 : 1.0)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LocalizedStringKey("Bearer token (optional)"))
+                    .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                    .foregroundStyle(.secondary)
+                SecureField(
+                    isAnthropic ? "OAuth" : "sk-...",
+                    text: Binding(
+                        get: { appState.usageEndpointBearerToken ?? "" },
+                        set: { appState.usageEndpointBearerToken = $0 }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                .disabled(isAnthropic)
+                .opacity(isAnthropic ? 0.55 : 1.0)
+            }
+
+            if provider == .minimax {
+                Text(LocalizedStringKey("usage.minimax.note"))
+                    .font(.system(size: ClaudeTheme.size(11)))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                jsonPathField(
+                    label: LocalizedStringKey("5h utilization JSON path"),
+                    placeholder: provider.defaultFiveHourPath ?? "five_hour.utilization",
+                    bindingPath: \.usageEndpointFiveHourPath,
+                    appState: appState
+                )
+                jsonPathField(
+                    label: LocalizedStringKey("7d utilization JSON path"),
+                    placeholder: provider.defaultSevenDayPath ?? "seven_day.utilization",
+                    bindingPath: \.usageEndpointSevenDayPath,
+                    appState: appState
+                )
+            }
+
+            Button {
+                testSheetOpen = true
+            } label: {
+                Label("Test Endpoint", systemImage: "play.circle")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func jsonPathField(
+        label: LocalizedStringKey,
+        placeholder: String,
+        bindingPath: ReferenceWritableKeyPath<AppState, String?>,
+        appState: AppState
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField(
+                placeholder,
+                text: Binding(
+                    get: { appState[keyPath: bindingPath] ?? placeholder },
+                    set: { appState[keyPath: bindingPath] = $0 }
+                )
+            )
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+        }
+    }
+
+    private func applyProviderDefaults(_ provider: UsageProvider, appState: AppState) {
+        switch provider {
+        case .anthropic:
+            // Clear user path overrides so the next Anthropic fetch uses
+            // the built-in defaults.
+            appState.usageEndpointFiveHourPath = nil
+            appState.usageEndpointSevenDayPath = nil
+        case .minimax:
+            if let ep = appState.usageEndpoint, ep.isEmpty,
+               let def = UsageProvider.minimax.defaultEndpoint {
+                appState.usageEndpoint = def
+            }
+        case .openai:
+            if appState.usageEndpointFiveHourPath == nil {
+                appState.usageEndpointFiveHourPath = UsageProvider.openai.defaultFiveHourPath
+            }
+            if appState.usageEndpointSevenDayPath == nil {
+                appState.usageEndpointSevenDayPath = UsageProvider.openai.defaultSevenDayPath
+            }
+        case .custom:
+            break
         }
     }
 
@@ -707,6 +761,54 @@ private struct ThemePickerRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+    }
+}
+
+// MARK: - Usage Settings View Model (stub; filled in by Task 12)
+
+@MainActor
+@Observable
+final class UsageSettingsViewModel {
+    enum TestState {
+        case idle
+        case running
+    }
+    var testState: TestState = .idle
+}
+
+private struct TestEndpointSheet: View {
+    let viewModel: UsageSettingsViewModel
+    let appState: AppState
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack {
+            Text("Test Endpoint sheet — coming next")
+            Button("Close") { isPresented = false }
+        }
+        .frame(width: 480, height: 320)
+    }
+}
+
+// MARK: - UsageProvider UI helpers
+
+private extension UsageProvider {
+    var displayName: String {
+        switch self {
+        case .anthropic: return "Anthropic"
+        case .minimax:   return "MiniMax"
+        case .openai:    return "OpenAI"
+        case .custom:    return "Custom"
+        }
+    }
+
+    var endpointPlaceholder: String {
+        switch self {
+        case .anthropic: return "https://api.anthropic.com/api/oauth/usage"
+        case .minimax:   return "https://www.minimaxi.com/v1/token_plan/remains"
+        case .openai:    return "https://your-proxy/openai/usage"
+        case .custom:    return "https://your-server/usage"
+        }
     }
 }
 
