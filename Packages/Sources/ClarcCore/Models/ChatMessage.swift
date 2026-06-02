@@ -15,10 +15,12 @@ public struct MessageBlock: Identifiable, Codable, Sendable, Equatable {
     public var thinking: String?
     public var thinkingDuration: TimeInterval?
     public var isThinkingRedacted: Bool
+    public var taskUpdate: TaskUpdateMessage?
 
     public var isText: Bool { text != nil }
     public var isToolCall: Bool { toolCall != nil }
     public var isThinking: Bool { thinking != nil || isThinkingRedacted }
+    public var isTaskUpdate: Bool { taskUpdate != nil }
 
     public init(
         id: String,
@@ -26,7 +28,8 @@ public struct MessageBlock: Identifiable, Codable, Sendable, Equatable {
         toolCall: ToolCall? = nil,
         thinking: String? = nil,
         thinkingDuration: TimeInterval? = nil,
-        isThinkingRedacted: Bool = false
+        isThinkingRedacted: Bool = false,
+        taskUpdate: TaskUpdateMessage? = nil
     ) {
         self.id = id
         self.text = text
@@ -34,6 +37,7 @@ public struct MessageBlock: Identifiable, Codable, Sendable, Equatable {
         self.thinking = thinking
         self.thinkingDuration = thinkingDuration
         self.isThinkingRedacted = isThinkingRedacted
+        self.taskUpdate = taskUpdate
     }
 
     public static func text(_ text: String, id: String = UUID().uuidString) -> MessageBlock {
@@ -56,8 +60,12 @@ public struct MessageBlock: Identifiable, Codable, Sendable, Equatable {
         MessageBlock(id: id, isThinkingRedacted: true)
     }
 
+    public static func taskUpdate(_ update: TaskUpdateMessage, id: String = UUID().uuidString) -> MessageBlock {
+        MessageBlock(id: id, taskUpdate: update)
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case id, text, toolCall, thinking, thinkingDuration, isThinkingRedacted
+        case id, text, toolCall, thinking, thinkingDuration, isThinkingRedacted, taskUpdate
     }
 
     public init(from decoder: Decoder) throws {
@@ -68,6 +76,7 @@ public struct MessageBlock: Identifiable, Codable, Sendable, Equatable {
         thinking = try c.decodeIfPresent(String.self, forKey: .thinking)
         thinkingDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .thinkingDuration)
         isThinkingRedacted = try c.decodeIfPresent(Bool.self, forKey: .isThinkingRedacted) ?? false
+        taskUpdate = try c.decodeIfPresent(TaskUpdateMessage.self, forKey: .taskUpdate)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -78,6 +87,7 @@ public struct MessageBlock: Identifiable, Codable, Sendable, Equatable {
         try c.encodeIfPresent(thinking, forKey: .thinking)
         try c.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
         if isThinkingRedacted { try c.encode(true, forKey: .isThinkingRedacted) }
+        try c.encodeIfPresent(taskUpdate, forKey: .taskUpdate)
     }
 }
 
@@ -194,6 +204,10 @@ public struct ChatMessage: Identifiable, Codable, Sendable, Equatable {
 
     public var toolCalls: [ToolCall] {
         blocks.compactMap(\.toolCall)
+    }
+
+    public var taskUpdates: [TaskUpdateMessage] {
+        blocks.compactMap(\.taskUpdate)
     }
 
     public mutating func appendText(_ text: String) {
