@@ -253,6 +253,8 @@
 "Endpoint URL" = "端点 URL";
 "Bearer token (optional)" = "Bearer 令牌(可选)";
 "usage.endpoint.desc" = "默认情况下 MiniClarc 用您的 OAuth 访问令牌查询 Anthropic 官方的 oauth/usage 端点。开启开关后可指向自定义 URL,并通过两个 JSON 路径字段指定响应中 5h / 7d 利用率数字的位置(例如 Anthropic 协议用 'five_hour.utilization',MiniMax 风格的代理用 'data.five_hour_plan_remains_percent')。路径用 '.' 走嵌套字典;叶子节点必须是 0-100 的 JSON 数字。";
+"usage.provider.desc" = "选择用量数据来源。Anthropic 使用你的 OAuth 凭据;其他 provider 使用自定义 URL + Bearer Token。";
+"usage.minimax.note" = "MiniMax provider 自动解析 model_remains 字段,无需配置 JSON path。";
 
 
 // MARK: - Effort Level Descriptions
