@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ClarcCore
 
@@ -33,6 +34,19 @@ struct UsageProviderTests {
     func minimaxPaths() {
         #expect(UsageProvider.minimax.defaultFiveHourPath == nil)
         #expect(UsageProvider.minimax.defaultSevenDayPath == nil)
+    }
+
+    @Test("MiniMax endpoint host is the verified www host, not the unverified api host")
+    func minimaxEndpointHost() {
+        // Guard against regressing into the api-subdomain hypothesis
+        // (see UsageProvider.swift comment). The api host happened to
+        // work in our reproduction too, but www is the host the user
+        // validated against and that we are migrating to.
+        guard let url = URL(string: UsageProvider.minimax.defaultEndpoint ?? "") else {
+            Issue.record("MiniMax default endpoint is not a valid URL")
+            return
+        }
+        #expect(url.host == "www.minimaxi.com")
     }
 
     @Test("OpenAI and Custom have empty defaults — user fills them in")

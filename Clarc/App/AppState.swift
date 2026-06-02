@@ -517,6 +517,7 @@ final class AppState {
         self.persistence = PersistenceService(metaStore: metaStore, cliStore: cliStore)
 
         migrateUsageProvider()
+        migrateMiniMaxEndpoint()
 
         self.didBecomeActiveObserverToken = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
@@ -547,6 +548,7 @@ final class AppState {
     // MARK: - Migrations
 
     private static let didMigrateUsageProviderKey = "usageProviderMigrated"
+    private static let didMigrateMiniMaxEndpointKey = "miniMaxEndpointMigratedToWww"
 
     private func migrateUsageProvider() {
         guard !UserDefaults.standard.bool(forKey: Self.didMigrateUsageProviderKey) else { return }
@@ -556,6 +558,40 @@ final class AppState {
         // working. New users get the default (.anthropic).
         if let ep = usageEndpoint, !ep.isEmpty {
             usageProvider = .custom
+        }
+    }
+
+    /// Earlier code points pointed the MiniMax default at the `api`
+    /// subdomain (commit ad7c457) based on an unverified hypothesis. The
+    /// user's working curl actually hits `www`, and POST on either host
+    /// returns 404. This migration rewrites a persisted MiniMax endpoint
+    /// back to the verified `www` host regardless of which wrong host
+    /// the user may have ended up with. Idempotent and guarded by a
+    /// UserDefaults flag so it only runs once per install.
+    private func migrateMiniMaxEndpoint() {
+        guard !UserDefaults.standard.bool(forKey: Self.didMigrateMiniMaxEndpointKey) else { return }
+        UserDefaults.standard.set(true, forKey: Self.didMigrateMiniMaxEndpointKey)
+
+        guard usageProvider == .minimax,
+              let ep = usageEndpoint,
+              !ep.isEmpty,
+              let canonical = UsageProvider.minimax.defaultEndpoint
+        else { return }
+
+        // Rewrite the api→www, the old www→www (idempotent), and any
+        // host that isn't already the canonical one. Skip if the user
+        // genuinely typed a custom path on the canonical host.
+        let apiHost = "api.minimaxi.com"
+        let canonicalHost = URL(string: canonical)?.host
+        guard let parsedHost = URL(string: ep)?.host else { return }
+
+        if parsedHost == apiHost {
+            usageEndpoint = canonical
+        } else if canonicalHost != nil, parsedHost != canonicalHost {
+            // Some users may have typed a different host (e.g. an older
+            // build pointing at a now-defunct gateway). Repoint them at
+            // the verified host too — they were already broken.
+            usageEndpoint = canonical
         }
     }
 

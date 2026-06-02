@@ -16,14 +16,22 @@ public struct MiniMaxAdapter: UsageAdapter {
         guard let url = URL(string: urlString) else { throw UsageError.invalidURL }
 
         var request = URLRequest(url: url)
+        request.httpMethod = "GET"
         if let token = config.bearerToken, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 10
 
+        Self.logger.info("fetch method=\(request.httpMethod ?? "?") url=\(urlString, privacy: .public) tokenSet=\(config.bearerToken?.isEmpty == false)")
+
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw UsageError.http(status: -1, body: data)
+        }
+        Self.logger.info("response status=\(http.statusCode) bytes=\(data.count) url=\(http.url?.absoluteString ?? "?", privacy: .public)")
+        if http.statusCode != 200 {
+            let preview = String(data: data.prefix(400), encoding: .utf8) ?? "<non-utf8>"
+            Self.logger.error("non-200 body preview: \(preview, privacy: .public)")
         }
         guard http.statusCode == 200 else {
             throw UsageError.http(status: http.statusCode, body: data)
