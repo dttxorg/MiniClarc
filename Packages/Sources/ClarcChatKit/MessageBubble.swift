@@ -85,6 +85,16 @@ struct MessageBubble: View {
                                 isMessageStreaming: message.isStreaming
                             )
                         }
+                        if let taskUpdate = block.taskUpdate,
+                           let store = chatBridge.taskProgressStore {
+                            TaskUpdateCard(
+                                update: taskUpdate,
+                                isExpanded: Binding(
+                                    get: { store.isExpanded(taskUpdate) },
+                                    set: { store.setExpanded($0, for: taskUpdate.id) }
+                                )
+                            )
+                        }
                     }
                 }
 
