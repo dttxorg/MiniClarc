@@ -1,3 +1,9 @@
+// Modifications Copyright 2026 dttxorg (Clarc CN).
+// SPDX-License-Identifier: Apache-2.0
+//
+// Originally: Clarc (https://github.com/ttnear/Clarc), Apache License 2.0.
+// See ../../NOTICE in the repository root for the full modification history.
+
 import SwiftUI
 import ClarcCore
 import ClarcChatKit
@@ -301,34 +307,69 @@ struct GeneralSettingsTab: View {
     // MARK: - Source Code Section
 
     private var sourceCodeSection: some View {
-        Link(destination: URL(string: "https://github.com/ttnear/Clarc")!) {
-            HStack(spacing: 10) {
-                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: ClaudeTheme.size(14)))
-                    .frame(width: 20)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Open Source")
-                        .font(.system(size: ClaudeTheme.size(13)))
-                        .foregroundStyle(.primary)
-                    Text(verbatim: "github.com/ttnear/Clarc")
-                        .font(.system(size: ClaudeTheme.size(11)))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "arrow.up.right.square")
+        VStack(spacing: 8) {
+            // Current fork (Clarc CN) — where users can file issues and find releases.
+            Link(destination: URL(string: "https://github.com/dttxorg/ClarcCN")!) {
+                linkRow(
+                    icon: "chevron.left.forwardslash.chevron.right",
+                    title: "Clarc CN",
+                    subtitle: "github.com/dttxorg/ClarcCN"
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Upstream attribution — Apache 2.0 §4d allows acknowledgements, only
+            // forbids using the upstream name to imply endorsement. We always show
+            // the upstream URL so users know where the original work came from.
+            Link(destination: URL(string: "https://github.com/ttnear/Clarc")!) {
+                linkRow(
+                    icon: "arrow.triangle.branch",
+                    title: "Upstream (ttnear/Clarc)",
+                    subtitle: "github.com/ttnear/Clarc"
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Apache 2.0 LICENSE — Section 4a of the license requires that the
+            // LICENSE text accompany all distributions. The link points to the
+            // file in the same repository so users can always find the full text.
+            Link(destination: URL(string: "https://github.com/dttxorg/ClarcCN/blob/main/LICENSE")!) {
+                linkRow(
+                    icon: "doc.text",
+                    title: "Apache License 2.0",
+                    subtitle: "View full license text"
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func linkRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: ClaudeTheme.size(14)))
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(LocalizedStringKey(title))
+                    .font(.system(size: ClaudeTheme.size(13)))
+                    .foregroundStyle(.primary)
+                Text(verbatim: subtitle)
                     .font(.system(size: ClaudeTheme.size(11)))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color(NSColor.controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color(NSColor.separatorColor), lineWidth: 1)
-            )
+            Spacer()
+            Image(systemName: "arrow.up.right.square")
+                .font(.system(size: ClaudeTheme.size(11)))
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color(NSColor.separatorColor), lineWidth: 1)
+        )
     }
 
     // MARK: - Help Section

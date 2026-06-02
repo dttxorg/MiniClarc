@@ -25,10 +25,10 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string></string>
+	<string>Copyright 2024-2026 The Clarc Authors (originally: ttnear). Licensed under the Apache License, Version 2.0.</string>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/ttnear/Clarc/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/dttxorg/ClarcCN/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>o1+OjC4eJrHnvmfwRxGPhH8OQFD21WYlxkFndh+4J0M=</string>
+	<string></string>
 </dict>
 </plist>

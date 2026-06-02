@@ -1,4 +1,9 @@
-# Clarc
+# Clarc CN — 中文社区增强版
+
+> **Based on [ttnear/Clarc](https://github.com/ttnear/Clarc)** (Apache License 2.0).
+> Clarc CN is an independently maintained, hard-forked distribution with
+> extra features, localized defaults, and a faster release cadence. See
+> [`FORK.md`](./FORK.md) for the full attribution and modification history.
 
 **The terminal was for the few. Clarc is for everyone.**
 
@@ -6,8 +11,20 @@ Clarc is a lightweight native macOS desktop client for Claude Code. It brings th
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2015.0%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6.x-orange)
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
+
+---
+
+## What's different in Clarc CN
+
+This fork ships extra features that have not been (or are not yet) merged upstream. See [`FORK.md`](./FORK.md) for the full list. Highlights:
+
+- **Full Access permission mode** — auto-approves every tool call without prompts (uses `--permission-mode bypassPermissions` + `--allowedTools "*"`).
+- **Phase-based auto-collapse** — completed thinking / tool_use / tool_result blocks collapse to a single-line summary; the final text response stays expanded.
+- **Configurable fold threshold** — long histories fold to 8 / 15 / 30 / Off (was hardcoded 30).
+- **Focus Mode fix** — the chat view no longer freezes when Focus Mode is enabled.
+- **i18n polish** — PermissionModal countdown, fold threshold picker, phase labels, and permission descriptions all respect the system language (en / zh-Hans / ko).
 
 ---
 
@@ -90,9 +107,9 @@ Same engine, no terminal required.
 
 ## Installation
 
-1. Download the latest `Clarc-x.y.z.zip` from the [Releases](https://github.com/ttnear/Clarc/releases) page.
-2. Unzip and move `Clarc.app` to your `Applications` folder.
-3. Launch `Clarc.app`.
+1. Download the latest `ClarcCN-x.y.z.zip` from the [Releases](https://github.com/dttxorg/ClarcCN/releases) page.
+2. Unzip and move `Clarc CN.app` to your `Applications` folder.
+3. Launch `Clarc CN.app`.
 
 ### First Launch on macOS 15 (Sequoia)
 

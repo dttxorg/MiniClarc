@@ -1,9 +1,10 @@
-name: Build Clarc (fork)
+name: Build Clarc CN
 
-# Fork-only CI for the dttxorg/Clarc fork.
+# CI for the Clarc CN (dttxorg/ClarcCN) hard-fork distribution.
+# Distinct from upstream ttnear/Clarc — see NOTICE and FORK.md.
 #
 # Triggers:
-#   - Tag push matching v* (e.g. v1.3.2-fork.1): build + sign + zip + GitHub Release
+#   - Tag push matching v* (e.g. v2.0.0): build + sign + zip + GitHub Release
 #   - Manual dispatch (workflow_dispatch): build + sign + zip, attach to a "fork-preview" run
 #
 # This workflow does NOT notarize (no Apple Developer ID available in fork).
@@ -43,7 +44,7 @@ jobs:
             VERSION="${GITHUB_REF_NAME#v}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building Clarc v$VERSION"
+          echo "Building Clarc CN v$VERSION"
 
       - name: Select Xcode
         # Package.swift declares swift-tools-version 6.2, which Xcode 16.0/16.1
@@ -117,35 +118,46 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: "Clarc ${{ steps.version.outputs.version }} (fork build)"
+          name: "Clarc CN ${{ steps.version.outputs.version }}"
           draft: true
           generate_release_notes: true
           body: |
-            ## ⚠️ Fork build — not an official release
+            ## Clarc CN — 中文社区增强版
 
-            This build was produced by the [dttxorg/Clarc](https://github.com/dttxorg/Clarc) fork
-            because the upstream PR ([ttnear/Clarc#16](https://github.com/ttnear/Clarc/pull/16))
-            that adds the on-request auto-approval feature has not yet been merged.
+            This build is produced by the [dttxorg/ClarcCN](https://github.com/dttxorg/ClarcCN)
+            hard-fork distribution. It is **not** an official upstream Clarc release; it
+            is independently maintained under the same Apache License 2.0. See
+            [`FORK.md`](https://github.com/dttxorg/ClarcCN/blob/main/FORK.md) and
+            [`NOTICE`](https://github.com/dttxorg/ClarcCN/blob/main/NOTICE) in the
+            source tree for the full attribution.
 
-            **What you get**
-            - Auto-approval of `Edit`/`Write`/`MultiEdit` whose target path is inside the
-              registered project root (see PR #16 for details).
-            - 16 additional read-only Bash commands added to the safety whitelist
-              (`tokei`, `cloc`, `tar`, `unzip`, `zip`, `xxd`, `hexdump`, `od`, `strings`,
-              `shasum`, `md5sum`, `sha256sum`, `base64`, `id`, `groups`, `rev`, `time`, `cal`).
+            **What's in this build**
+            - All upstream Clarc features carried forward.
+            - **Full Access** permission mode (auto-approves every tool call).
+            - **Phase-based auto-collapse** for completed thinking / tool_use /
+              tool_result blocks (final text response stays expanded).
+            - **Configurable fold threshold** for long chat histories (8 / 15 / 30 / Off).
+            - **Focus Mode fix** — no more frozen chat view when focus mode is on.
+            - **i18n** — PermissionModal countdown, fold threshold picker, phase labels,
+              and permission descriptions localized in en / zh-Hans / ko.
 
             **Install**
             1. Download `Clarc-${{ steps.version.outputs.version }}.zip` below.
-            2. Unzip and drag `Clarc.app` to `/Applications`.
-            3. On first launch, right-click `Clarc.app` → **Open** → confirm the Gatekeeper prompt
-               (the build is **ad-hoc signed**, not notarized with an Apple Developer ID).
+            2. Unzip and drag `Clarc CN.app` to `/Applications`.
+            3. On first launch, right-click `Clarc CN.app` → **Open** → confirm the
+               Gatekeeper prompt (the build is **ad-hoc signed**, not notarized with
+               an Apple Developer ID).
             4. After the first launch, normal double-click works.
+            5. The bundle id is `com.dttxorg.ClarcCN`, distinct from upstream
+               `com.idealapp.Clarc`. The two can coexist on the same Mac.
 
             **Caveats**
-            - Sparkle auto-updater will not see this build as an update — it points to the
-              upstream `ttnear/Clarc` appcast. Disable "Check for updates" in the in-app
-              Update menu, or replace the installed app manually when a new fork build ships.
-            - No Apple notarization. macOS Gatekeeper will require the right-click-open
-              workaround on every fresh install.
+            - Sparkle `SUPublicEDKey` is empty in v2.0.0. Update checks still work,
+              but signatures are not yet verified. Download only from this fork's
+              Releases page; do not trust third-party mirrors.
+            - No Apple notarization. macOS Gatekeeper will require the
+              right-click-open workaround on every fresh install.
+            - This distribution does not track upstream releases 1:1. If you need a
+              specific upstream feature, file an issue on dttxorg/ClarcCN.
           files: |
             build/Clarc-*.zip

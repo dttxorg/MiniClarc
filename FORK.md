@@ -1,94 +1,128 @@
-# Clarc — fork build (dttxorg/Clarc)
+# Clarc CN — fork 总览
 
-This is a **personal fork** of [ttnear/Clarc](https://github.com/ttnear/Clarc).
-It exists because the upstream PR that adds the on-request auto-approval
-feature ([#16](https://github.com/ttnear/Clarc/pull/16)) was filed upstream
-but is not yet merged. This fork keeps that change available as a
-downloadable build so you can use it regardless of upstream's release
-cadence.
+> **Clarc CN** (`dttxorg/ClarcCN`) 是一个**独立维护的硬分叉**版本,基于
+> [ttnear/Clarc](https://github.com/ttnear/Clarc)。本仓库与上游共享同一份
+> Apache License 2.0 协议,但**走自己的版本号、发版节奏和路线图**,不依赖
+> 上游合并 PR。
 
-## What's in this fork
+---
 
-The fork branch `feat/auto-approve-in-project-root` contains:
+## 1. 来源与致谢
 
-- **Phase 1 on-request approval** — auto-approve `Edit`/`Write`/`MultiEdit`
-  tool calls whose target path is lexically inside the registered project
-  root. Modal still appears for any path outside the project.
-- **Bash safety whitelist expansion** — 16 additional read-only commands
-  (`tokei`, `cloc`, `tar`, `unzip`, `zip`, `xxd`, `hexdump`, `od`,
-  `strings`, `shasum`, `md5sum`, `sha256sum`, `base64`, `id`, `groups`,
-  `rev`, `time`, `cal`).
-- **`PathContainment.isInside(parent:child:)`** in `ClarcCore` (lexical,
-  no filesystem access, no symlink resolution).
-- 12 new unit tests in `Packages/Tests/ClarcCoreTests/PathContainmentTests.swift`.
+Clarc CN 的全部原始代码、UI 设计、协议和大部分架构决策来自上游
+[ttnear/Clarc](https://github.com/ttnear/Clarc)。我们对原作者
+[ttnear](https://github.com/ttnear) 表示衷心感谢 —— 没有上游的扎实工作,
+这个分叉不会存在。
 
-No changes to UI, hook matcher, `PermissionMode` enum, or `appcast.xml`.
+按 Apache License 2.0 §4 的要求:
+- ✅ 完整 LICENSE 文本随每一次分发附带(`/LICENSE`)
+- ✅ 所有修改过的文件头部加注 "Modifications Copyright ... SPDX-License-Identifier: Apache-2.0"
+- ✅ 上游 URL 在 Settings → 开源 面板中明示
+- ✅ 不会使用 `ttnear` / `Clarc` 商标暗示原作者为本分叉背书
 
-## How to install a fork build
+详见 [`NOTICE`](./NOTICE) 文件。
 
-1. Go to the [Releases page](https://github.com/dttxorg/Clarc/releases).
-2. Download the latest `Clarc-x.y.z-fork.n.zip`.
-3. Unzip and move `Clarc.app` to `/Applications` (overwrite the upstream
-   install if you have one — the bundle ID `com.idealapp.Clarc` is the same).
-4. On first launch, **right-click `Clarc.app` → Open** and confirm the
-   Gatekeeper prompt. The build is **ad-hoc signed** (not notarized with
-   an Apple Developer ID), so this manual approval is required.
-5. After the first launch, normal double-click works.
+---
 
-## How to update a fork build
+## 2. 跟上游的差异(分叉增量)
 
-The Sparkle auto-updater inside Clarc points at the upstream
-`ttnear/Clarc` appcast, so it will **not** see fork builds as updates.
-Pick one of:
+> **注意**:跟上游的差异**累积**而不是替代。每一次 release 都在前一次基础上叠加。
 
-- **Disable auto-update in the app** (Clarc → Check for Updates, never
-  enable it for fork builds). Re-download from this fork's Releases page
-  when a new fork build ships.
-- **Replace the installed `.app` manually** by repeating the install
-  steps above. Your `~/Library/Application Support/Clarc/` data is kept
-  across replacements.
+| 起始版本 | 增量 | commit | 说明 |
+|---|---|---|---|
+| v1.3.2-fork.4 | (从 feat/auto-approve-in-project-root 沿用) | `b26f613`..`a420e20` | on-request auto-approval + Bash 白名单扩展 + 16 工具 |
+| v1.3.2-fork.4 | 本地化修复 | `7b8b0d6` | PermissionModal 倒计时 + Settings 权限描述 |
+| v1.3.2-fork.4 | 全权限模式 | `cb43709` | `PermissionMode.fullAccess` + CLI 通配符 `--allowedTools "*"` |
+| v1.3.2-fork.4 | 3 档 UX 改进 | `2a82354` | 阶段式折叠 + fold 阈值 + Focus Mode 修复 |
+| v1.3.2-fork.4 | 编译可见性修复 | `a420e20` | `MessageGroup` 改 `internal`,让 CI 通过 |
+| **v2.0.0** | **本分叉的 1.0 版** | (即将提交) | 项目身份重塑:`com.idealapp.Clarc` → `com.dttxorg.ClarcCN`,display name → "Clarc CN",Sparkle feed 切到 `dttxorg/ClarcCN`,Settings 链接组重排,加 `NOTICE` 文件 |
 
-## How the fork is built
+### v2.0.0 之后会怎么演进
 
-This fork ships a fork-only GitHub Actions workflow
-(`.github/workflows/fork-build.yml`) that:
+- 走自己的版本号(`v2.x.y`)
+- 不再定期 rebase 上游;只在有价值时 cherry-pick
+- 上游合并的新功能**不**自动同步,需要时单独评估
+- 自己的路线图:本地化优先、UI 体验、可观测性
 
-- Runs on `macos-14` runners with Xcode 15.4.
-- Builds `Clarc.app` in `Release` configuration with ad-hoc signing
-  (`CODE_SIGN_IDENTITY=-`).
-- Packages the `.app` into a zip with the same flags the upstream
-  `scripts/build_zip.sh` uses (notably `--norsrc --noextattr --noqtn`
-  to avoid AppleDouble entries that break embedded frameworks).
-- On tag push (`v*` matching), creates a draft GitHub Release and
-  uploads the zip as an artifact.
+---
 
-It does **not** run Apple notarization, because the fork does not have
-a Developer ID certificate. That is why the install requires the
-right-click → Open dance.
+## 3. 安装(从分叉 release 下载)
 
-## Triggering a fork build manually
+1. 打开 [Releases 页面](https://github.com/dttxorg/ClarcCN/releases)
+2. 下载最新的 `Clarc-2.x.y.zip`(注意:不再是 `Clarc-x.y.z-fork.n.zip`)
+3. 解压后把 `Clarc CN.app`(注意:不是 `Clarc.app`)拖到 `/Applications`
+4. **bundle id 是 `com.dttxorg.ClarcCN`**,跟上游 `com.idealapp.Clarc` 不冲突,可以共存
+5. 首次启动:**右键 `Clarc CN.app` → Open** 确认 Gatekeeper 弹窗(ad-hoc 签名,无 notarize)
+6. 之后双击即可
+
+---
+
+## 4. 更新(分叉内的版本升级)
+
+`SUFeedURL` 已切到 `https://raw.githubusercontent.com/dttxorg/ClarcCN/main/appcast.xml`。
+Sparkle 会检查本仓库 `main` 分支的 `appcast.xml`。
+
+**注意:** `SUPublicEDKey` 暂时为空(原值是上游 ttnear 的 EdDSA 公钥,不能复用)。这意味着:
+- 应用内"检查更新"按钮仍能拉到本分叉的新版本
+- 但**没有签名校验**,用户需要自己确认下载源(`dttxorg/ClarcCN` GitHub Releases)
+- 待本地生成新的 EdDSA keypair 后(用 `scripts/setup_sparkle.sh`),把新公钥填回 `Clarc/Info.plist` 的 `SUPublicEDKey` 即可开启签名校验
+
+如果你从分叉 v1.x 升级到 v2.x,因为 bundle id 改了,**两个版本可以并存**,不会互相覆盖。
+
+---
+
+## 5. 构建
+
+### 5.1 CI(fork 专用)
+
+`.github/workflows/fork-build.yml` 在 push `v*` tag 时自动跑:
+- macos-15 runner,Xcode 16.4+
+- `xcodebuild` Release 配置 + ad-hoc 签名 (`CODE_SIGN_IDENTITY=-`)
+- `ditto -c -k --norsrc --noextattr --noqtn` 打包 zip
+- 上传 artifact + 创建 draft release
+
+### 5.2 手动触发本地构建(需要 macOS + Xcode)
 
 ```bash
-git tag v1.3.2-fork.1
-git push origin v1.3.2-fork.1
+open Clarc.xcodeproj   # Cmd+R 直接 run
+# 或者
+xcodebuild -project Clarc.xcodeproj -scheme Clarc -configuration Release build
 ```
 
-GitHub Actions will build, then attach `Clarc-1.3.2-fork.1.zip` to a
-draft release. Promote the draft to public when you're happy with it.
+打包:
+```bash
+# (上游 build_zip.sh 走 notarize,需要 Apple Developer ID;fork 不走那条路)
+# 直接用 CI 同款的 ditto:
+APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Clarc CN.app" -path "*Release*" -type d | head -n1)
+mkdir -p build
+ditto -c -k --keepParent --norsrc --noextattr --noqtn "$APP_PATH" build/Clarc-2.0.0.zip
+```
 
-## Re-syncing with upstream
+### 5.3 打 tag 触发 CI
 
 ```bash
-git fetch upstream
-git checkout main
-git merge upstream/main
-git push origin main
-git checkout feat/auto-approve-in-project-root
-git rebase main
-# resolve any conflicts, then:
-git push --force-with-lease origin feat/auto-approve-in-project-root
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
-## License
+`workflow_dispatch` 也可以手动触发(在 GitHub Actions 页面上)。
 
-Apache License 2.0, same as upstream. See [LICENSE](LICENSE).
+---
+
+## 6. 跟上游的协作(可选)
+
+虽然 Clarc CN 走独立路线,我们**欢迎**把分叉内有价值的改动提 PR 回上游:
+- i18n 修复、bug fix、UX 改进 —— 跟上游 PR #16 类似
+- 协议层的改动(`PermissionMode.fullAccess`、阶段式折叠) —— 上游未必感兴趣
+- 项目身份重塑 —— 显然只属于本分叉
+
+回 PR 的流程:**先把 `feat/...` rebase 到上游 `main`**,再开 PR。这是单独的工作流,不阻塞 Clarc CN 自己的发版。
+
+---
+
+## 7. License
+
+Apache License 2.0,与上游一致。完整文本见 [`LICENSE`](./LICENSE),
+修改声明见 [`NOTICE`](./NOTICE)。
+</content>
+</invoke>

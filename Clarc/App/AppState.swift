@@ -1,3 +1,9 @@
+// Modifications Copyright 2026 dttxorg (Clarc CN).
+// SPDX-License-Identifier: Apache-2.0
+//
+// Originally: Clarc (https://github.com/ttnear/Clarc), Apache License 2.0.
+// See ../../NOTICE in the repository root for the full modification history.
+
 import Foundation
 import ClarcCore
 import SwiftUI
