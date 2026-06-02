@@ -871,11 +871,16 @@ private struct TestEndpointSheet: View {
         }
         .padding(20)
         .frame(width: 540, height: 480)
-        .task(id: didRun) {
-            if !didRun {
-                didRun = true
-                await viewModel.test(appState: appState)
-            }
+        .task {
+            // No `id:` — that form cancels and restarts the task whenever
+            // the watched value changes. We don't need that: this sheet
+            // exists to run the test exactly once. Using `.task { }`
+            // (no id) runs once when the view appears and is cancelled
+            // only when the view goes away. The earlier `.task(id: didRun)`
+            // form immediately cancelled itself the moment it set
+            // `didRun = true`, surfacing as URLError.cancelled
+            // ("已取消") in the sheet.
+            await viewModel.test(appState: appState)
         }
     }
 
