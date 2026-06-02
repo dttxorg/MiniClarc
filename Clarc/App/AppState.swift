@@ -510,12 +510,13 @@ final class AppState {
     let directoryWatcher = DirectoryWatcher()
 
     init() {
-        migrateUsageProvider()
         let metaStore = self.metaStore
         let cliStore = CLISessionStore(metaStore: metaStore)
         self.cliStore = cliStore
         self.claude = ClaudeService(cliStore: cliStore)
         self.persistence = PersistenceService(metaStore: metaStore, cliStore: cliStore)
+
+        migrateUsageProvider()
 
         self.didBecomeActiveObserverToken = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
