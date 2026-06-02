@@ -4,6 +4,32 @@
 "Show less" = "Show less";
 "Show more" = "Show more";
 
+// MARK: - MessageListView
+"Show %lld earlier messages" = "Show %lld earlier messages";
+"Collapse earlier messages" = "Collapse earlier messages";
+"%lld tools executed" = "%lld tools executed";
+"How can I help you?" = "How can I help you?";
+"Thinking..." = "Thinking...";
+"Generating response..." = "Generating response...";
+"Phase: thinking" = "Phase: thinking";
+"Phase: text" = "Phase: text";
+"Phase: tool use" = "Phase: tool use";
+"Phase: tool result" = "Phase: tool result";
+
+// MARK: - Phase labels
+"Phase label: thinking" = "Thinking";
+"Phase label: text" = "Text";
+"Phase label: tool use" = "Tool: %@";
+"Phase label: tool result" = "Result";
+
+// MARK: - Fold threshold
+"Fold older messages" = "Fold older messages";
+"Fold threshold description" = "Collapse long chat histories to keep recent messages visible.";
+"Fold: 8" = "8 messages";
+"Fold: 15" = "15 messages";
+"Fold: 30" = "30 messages";
+"Fold: Off" = "Off";
+
 // MARK: - SlashCommandManagerView
 "Imported %lld custom commands." = "Imported %lld custom commands.";
 "A command with this name already exists." = "A command with this name already exists.";

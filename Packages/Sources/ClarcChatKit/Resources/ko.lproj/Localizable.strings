@@ -131,6 +131,24 @@
 "How can I help you?" = "무엇을 도와드릴까요?";
 "Thinking..." = "생각하는 중...";
 "Generating response..." = "응답 생성 중...";
+"Phase: thinking" = "단계: 생각";
+"Phase: text" = "단계: 텍스트";
+"Phase: tool use" = "단계: 도구 사용";
+"Phase: tool result" = "단계: 도구 결과";
+
+// MARK: - Phase labels
+"Phase label: thinking" = "생각";
+"Phase label: text" = "텍스트";
+"Phase label: tool use" = "도구: %@";
+"Phase label: tool result" = "결과";
+
+// MARK: - Fold threshold
+"Fold older messages" = "이전 메시지 접기";
+"Fold threshold description" = "긴 대화 기록을 접어 최근 메시지만 표시합니다.";
+"Fold: 8" = "8개";
+"Fold: 15" = "15개";
+"Fold: 30" = "30개";
+"Fold: Off" = "끄기";
 
 // MARK: - MessageBubble
 "Edit message..." = "메시지 편집...";

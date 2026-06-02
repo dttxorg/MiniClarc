@@ -35,8 +35,12 @@ struct ProjectWindowView: View {
                     .onChange(of: appState.focusMode) { _, newValue in
                         windowState.focusMode = newValue
                     }
+                    .onChange(of: appState.foldThreshold) { _, newValue in
+                        windowState.foldThreshold = newValue
+                    }
                     .onAppear {
                         windowState.focusMode = appState.focusMode
+                        windowState.foldThreshold = appState.foldThreshold
                     }
 
                     if inspectorStarted {

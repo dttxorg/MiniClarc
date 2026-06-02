@@ -72,8 +72,12 @@ struct MainView: View {
                 .onChange(of: appState.focusMode) { _, newValue in
                     windowState.focusMode = newValue
                 }
+                .onChange(of: appState.foldThreshold) { _, newValue in
+                    windowState.foldThreshold = newValue
+                }
                 .onAppear {
                     windowState.focusMode = appState.focusMode
+                    windowState.foldThreshold = appState.foldThreshold
                 }
                 .navigationTitle({
                     let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"

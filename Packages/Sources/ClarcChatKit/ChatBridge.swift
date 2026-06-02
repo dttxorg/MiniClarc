@@ -14,6 +14,10 @@ public final class ChatBridge {
     public var messages: [ChatMessage] = []
     public var isStreaming: Bool = false
     public var isThinking: Bool = false
+    /// The phase of the in-flight content block (e.g. thinking / toolUse /
+    /// toolResult / text). Pushed by AppState at each `content_block_start`
+    /// event so the UI can label and auto-collapse completed non-text phases.
+    public var currentPhase: StreamPhase?
     public var streamingStartDate: Date?
     public var lastTurnContextUsedPercentage: Double?
     public var modelDisplayName: String = ""

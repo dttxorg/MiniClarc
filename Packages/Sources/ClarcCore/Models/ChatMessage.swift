@@ -88,6 +88,12 @@ public struct ChatMessage: Identifiable, Codable, Sendable, Equatable {
     public var duration: TimeInterval?
     public var isError: Bool
     public var isCompactBoundary: Bool
+    /// The stream phase that was active when this message was finalized.
+    /// Nil for messages finalized before the phase-tracking feature shipped.
+    /// Used by the UI to auto-collapse non-text completed phases
+    /// (thinking / tool use / tool result) while leaving the final text
+    /// response expanded. See `StreamPhase`.
+    public var completedPhase: StreamPhase?
 
     public init(
         id: UUID = UUID(),
@@ -100,7 +106,8 @@ public struct ChatMessage: Identifiable, Codable, Sendable, Equatable {
         attachments: [Attachment] = [],
         duration: TimeInterval? = nil,
         isError: Bool = false,
-        isCompactBoundary: Bool = false
+        isCompactBoundary: Bool = false,
+        completedPhase: StreamPhase? = nil
     ) {
         self.id = id
         self.role = role
@@ -120,12 +127,13 @@ public struct ChatMessage: Identifiable, Codable, Sendable, Equatable {
         self.duration = duration
         self.isError = isError
         self.isCompactBoundary = isCompactBoundary
+        self.completedPhase = completedPhase
     }
 
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, blocks, isStreaming, isResponseComplete, timestamp, attachmentPaths, duration, isError, isCompactBoundary
+        case id, role, blocks, isStreaming, isResponseComplete, timestamp, attachmentPaths, duration, isError, isCompactBoundary, completedPhase
         case content, toolCalls
     }
 
@@ -140,6 +148,8 @@ public struct ChatMessage: Identifiable, Codable, Sendable, Equatable {
         duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration)
         isError = try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false
         isCompactBoundary = try container.decodeIfPresent(Bool.self, forKey: .isCompactBoundary) ?? false
+        // Backward-compatible: legacy JSONL sessions predate this field.
+        completedPhase = try container.decodeIfPresent(StreamPhase.self, forKey: .completedPhase)
 
         if let decodedBlocks = try container.decodeIfPresent([MessageBlock].self, forKey: .blocks) {
             blocks = decodedBlocks
@@ -170,6 +180,9 @@ public struct ChatMessage: Identifiable, Codable, Sendable, Equatable {
         try container.encodeIfPresent(duration, forKey: .duration)
         if isError { try container.encode(isError, forKey: .isError) }
         if isCompactBoundary { try container.encode(isCompactBoundary, forKey: .isCompactBoundary) }
+        // Skip encoding when nil to keep on-disk format compact and
+        // forward-compatible with sessions written before this field existed.
+        try container.encodeIfPresent(completedPhase, forKey: .completedPhase)
     }
 
     // MARK: - Convenience Accessors
