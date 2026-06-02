@@ -516,8 +516,13 @@ final class AppState {
         self.claude = ClaudeService(cliStore: cliStore)
         self.persistence = PersistenceService(metaStore: metaStore, cliStore: cliStore)
 
-        migrateUsageProvider()
+        // Order matters: migrateMiniMaxEndpoint first, because it needs
+        // to rewrite the (potentially wrong) `api.minimaxi.com` host
+        // back to the verified `www` host regardless of what the
+        // provider field says. migrateUsageProvider then runs on the
+        // corrected URL and won't mis-promote the user to .custom.
         migrateMiniMaxEndpoint()
+        migrateUsageProvider()
 
         self.didBecomeActiveObserverToken = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
@@ -556,9 +561,39 @@ final class AppState {
         // If the user had a non-empty custom endpoint before this feature
         // existed, treat them as a "custom" provider so their config keeps
         // working. New users get the default (.anthropic).
-        if let ep = usageEndpoint, !ep.isEmpty {
-            usageProvider = .custom
+        //
+        // Two refinements that fall out of the 162d219 follow-up:
+        //   1. Only fire for users still on the default provider
+        //      (.anthropic). If the user has explicitly chosen .minimax
+        //      or .openai, they did it through the picker — don't
+        //      silently clobber that with .custom.
+        //   2. Skip when the endpoint host matches a built-in provider
+        //      default. Such an endpoint was pre-filled by
+        //      `applyProviderDefaults` (or an earlier migration), not
+        //      typed by the user. Promoting it to .custom would defeat
+        //      `migrateMiniMaxEndpoint`, which runs before this and
+        //      needs to see the wrong api host to rewrite it.
+        guard usageProvider == .anthropic,
+              let ep = usageEndpoint, !ep.isEmpty,
+              let host = URL(string: ep)?.host,
+              !Self.hostMatchesBuiltInProvider(host)
+        else { return }
+        usageProvider = .custom
+    }
+
+    /// True if `host` is the host of any built-in provider's default
+    /// endpoint. Used by `migrateUsageProvider` to detect pre-filled
+    /// (rather than user-typed) endpoints so the legacy-custom
+    /// fallback doesn't clobber an explicit provider selection.
+    private static func hostMatchesBuiltInProvider(_ host: String) -> Bool {
+        for provider in UsageProvider.allCases {
+            guard let urlString = provider.defaultEndpoint,
+                  let url = URL(string: urlString),
+                  let providerHost = url.host
+            else { continue }
+            if providerHost == host { return true }
         }
+        return false
     }
 
     /// Earlier code points pointed the MiniMax default at the `api`
