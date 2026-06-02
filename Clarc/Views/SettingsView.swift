@@ -1055,7 +1055,7 @@ private extension UsageProvider {
     var endpointPlaceholder: String {
         switch self {
         case .anthropic: return "https://api.anthropic.com/api/oauth/usage"
-        case .minimax:   return "https://www.minimaxi.com/v1/token_plan/remains"
+        case .minimax:   return "https://api.minimaxi.com/v1/token_plan/remains"
         case .openai:    return "https://your-proxy/openai/usage"
         case .custom:    return "https://your-server/usage"
         }

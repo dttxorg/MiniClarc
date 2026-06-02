@@ -16,7 +16,14 @@ public enum UsageProvider: String, Codable, CaseIterable, Sendable {
     public var defaultEndpoint: String? {
         switch self {
         case .anthropic: return "https://api.anthropic.com/api/oauth/usage"
-        case .minimax:   return "https://www.minimaxi.com/v1/token_plan/remains"
+        // The www.minimaxi.com host is a public marketing / management
+        // CDN that does not host the API gateway. The real Token Plan
+        // endpoint lives on the api subdomain — see diagnostic output
+        // (DNS resolves www to a front-end Aliyun cluster that returns
+        // "404 page not found" for this path; api resolves to the
+        // openplatform-api server which returns the model_remains
+        // JSON payload).
+        case .minimax:   return "https://api.minimaxi.com/v1/token_plan/remains"
         case .openai:    return nil
         case .custom:    return nil
         }
