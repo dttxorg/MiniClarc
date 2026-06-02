@@ -1234,18 +1234,29 @@ final class AppState {
                     if let start = state.streamingStartDate {
                         state.streamingTail!.messages[idx].duration = Date().timeIntervalSince(start)
                     }
+
+                    // stripNoOpText may remove `idx` entirely if the entire
+                    // message collapsed to empty (typical for hook re-entry
+                    // / ScheduleWakeup turns). Capture the message's id
+                    // first, then re-resolve the surviving index by id so
+                    // the phase summary build doesn't index out of range.
+                    let finalizedID = state.streamingTail!.messages[idx].id
                     Self.stripNoOpText(at: idx, in: &state.streamingTail!.messages)
 
-                    // Build a per-turn roll-up summary for the just-finished
-                    // turn. Pushed to ChatBridge.phaseSummaries for the UI to
-                    // render as a collapsible card. See `PhaseSummary` for
-                    // the per-turn model.
-                    let summary = Self.makePhaseSummary(
-                        forMessage: state.streamingTail!.messages[idx],
-                        previousSummaries: state.phaseSummaries,
-                        streamingStartDate: state.streamingStartDate
-                    )
-                    state.phaseSummaries.append(summary)
+                    if let survivingIdx = state.streamingTail!.messages.firstIndex(where: { $0.id == finalizedID }) {
+                        // Build a per-turn roll-up summary for the just-finished
+                        // turn. Pushed to ChatBridge.phaseSummaries for the UI to
+                        // render as a collapsible card. See `PhaseSummary` for
+                        // the per-turn model.
+                        let summary = Self.makePhaseSummary(
+                            forMessage: state.streamingTail!.messages[survivingIdx],
+                            previousSummaries: state.phaseSummaries,
+                            streamingStartDate: state.streamingStartDate
+                        )
+                        state.phaseSummaries.append(summary)
+                    }
+                    // If the message was stripped, there's nothing to
+                    // summarize — skip the phase summary silently.
                 }
             }
 
