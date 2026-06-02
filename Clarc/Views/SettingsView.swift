@@ -261,43 +261,50 @@ struct GeneralSettingsTab: View {
     private func providerFields(for provider: UsageProvider) -> some View {
         @Bindable var appState = appState
 
-        let isAnthropic = (provider == .anthropic)
-
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(LocalizedStringKey("Endpoint URL"))
-                    .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                    .foregroundStyle(.secondary)
-                TextField(
-                    provider.endpointPlaceholder,
-                    text: Binding(
-                        get: { appState.usageEndpoint ?? provider.endpointPlaceholder },
-                        set: { appState.usageEndpoint = $0 }
+            // Endpoint URL: shown only for Custom (Anthropic / MiniMax
+            // have a fixed built-in URL, OpenAI's proxy endpoint is
+            // identified by the user-supplied JSON paths rather than a
+            // host).
+            if provider == .custom {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey("Endpoint URL"))
+                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        provider.endpointPlaceholder,
+                        text: Binding(
+                            get: { appState.usageEndpoint ?? provider.endpointPlaceholder },
+                            set: { appState.usageEndpoint = $0 }
+                        )
                     )
-                )
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
-                .disabled(isAnthropic)
-                .opacity(isAnthropic ? 0.55 : 1.0)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                }
+            } else {
+                builtInEndpointCaption(provider: provider)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(LocalizedStringKey("Bearer token (optional)"))
-                    .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                    .foregroundStyle(.secondary)
-                SecureField(
-                    isAnthropic ? "OAuth" : "sk-...",
-                    text: Binding(
-                        get: { appState.usageEndpointBearerToken ?? "" },
-                        set: { appState.usageEndpointBearerToken = $0 }
+            // Bearer token: hidden for Anthropic (uses OAuth).
+            if provider != .anthropic {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey("Bearer token"))
+                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                        .foregroundStyle(.secondary)
+                    SecureField(
+                        tokenPlaceholder(for: provider),
+                        text: Binding(
+                            get: { appState.usageEndpointBearerToken ?? "" },
+                            set: { appState.usageEndpointBearerToken = $0 }
+                        )
                     )
-                )
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
-                .disabled(isAnthropic)
-                .opacity(isAnthropic ? 0.55 : 1.0)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                }
             }
 
+            // 5h / 7d JSON paths: hidden for MiniMax (parsed internally
+            // by the adapter against a known schema), shown otherwise.
             if provider == .minimax {
                 Text(LocalizedStringKey("usage.minimax.note"))
                     .font(.system(size: ClaudeTheme.size(11)))
@@ -324,6 +331,41 @@ struct GeneralSettingsTab: View {
                 Label("Test Endpoint", systemImage: "play.circle")
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    /// One-line caption shown in place of the URL field for providers
+    /// with a fixed built-in endpoint. Tells the user which host we're
+    /// talking to without giving them anything to type.
+    @ViewBuilder
+    private func builtInEndpointCaption(provider: UsageProvider) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(LocalizedStringKey("Endpoint"))
+                .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(provider.endpointPlaceholder ?? "")
+                .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(NSColor.textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color(NSColor.separatorColor), lineWidth: 0.5)
+                )
+        }
+    }
+
+    private func tokenPlaceholder(for provider: UsageProvider) -> String {
+        switch provider {
+        case .minimax: return "sk-cp-..."
+        case .openai:  return "sk-..."
+        default:       return "Bearer token"
         }
     }
 
