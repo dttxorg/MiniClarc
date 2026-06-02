@@ -187,10 +187,20 @@
 "File" = "文件";
 "Input" = "输入";
 "Auto-deny in %@" = "%@ 后自动拒绝";
+"No auto-deny" = "不自动拒绝";
 "Deny" = "拒绝";
 "Allow" = "允许";
 "Allow this tool for the session" = "本次会话允许此工具";
 "Always allow this command" = "始终允许此命令";
+
+// MARK: - Auto-deny timeout (Settings)
+"Permission Auto-Deny" = "权限自动拒绝";
+"Auto-deny after" = "自动拒绝时长";
+"How long a pending permission request waits for your decision before Clarc denies it automatically. Choose a longer window or “Don’t auto-deny” if you step away from the keyboard." = "待处理的权限请求在 Clarc 自动拒绝前等待你决定的时长。如果你需要暂时离开键盘,可选择更长的等待时间或「不自动拒绝」。";
+"5 minutes" = "5 分钟";
+"10 minutes" = "10 分钟";
+"30 minutes" = "30 分钟";
+"Don't auto-deny" = "不自动拒绝";
 
 
 // MARK: - OnboardingView
@@ -235,6 +245,7 @@
 "perm.desc.plan" = "只读模式。Claude 调研并给出方案,不进行任何修改。其他操作的提示与默认模式相同。";
 "perm.desc.auto" = "运行时不出现权限提示。后台分类器会在执行前审查每个操作的安全性。";
 "perm.desc.bypassPermissions" = "跳过所有权限检查和安全网关。仅在无网络访问的隔离容器或虚拟机中使用。";
+"perm.desc.fullAccess" = "自动批准所有工具调用,不再弹出任何提示。任何 Bash 命令、文件编辑与网络请求都被放行。仅在完全信任的项目上使用。";
 
 
 // MARK: - Effort Level Descriptions

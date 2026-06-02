@@ -173,10 +173,20 @@
 "File" = "파일";
 "Input" = "입력";
 "Auto-deny in %@" = "%@ 후 자동 거부";
+"No auto-deny" = "자동 거부 안 함";
 "Deny" = "거부";
 "Allow" = "허용";
 "Allow this tool for the session" = "이 세션 동안 허용";
 "Always allow this command" = "이 명령 항상 허용";
+
+// MARK: - Auto-deny timeout (Settings)
+"Permission Auto-Deny" = "권한 자동 거부";
+"Auto-deny after" = "자동 거부 시간";
+"How long a pending permission request waits for your decision before Clarc denies it automatically. Choose a longer window or “Don’t auto-deny” if you step away from the keyboard." = "Clarc가 자동으로 요청을 거부하기 전에 사용자의 응답을 기다리는 시간입니다. 키보드에서 잠시 떨어질 때는 더 긴 시간 또는 “자동 거부 안 함”을 선택하세요.";
+"5 minutes" = "5분";
+"10 minutes" = "10분";
+"30 minutes" = "30분";
+"Don't auto-deny" = "자동 거부 안 함";
 
 // MARK: - OnboardingView
 "Claude CLI Installation Check" = "Claude CLI 설치 확인";
@@ -216,6 +226,7 @@
 "perm.desc.plan" = "읽기 전용 모드입니다. Claude가 변경 없이 코드베이스를 분석하고 계획을 제안합니다. 나머지 작업에는 기본 모드와 동일한 확인을 적용합니다.";
 "perm.desc.auto" = "권한 확인 없이 실행됩니다. 백그라운드 분류기가 각 작업을 실행 전에 안전 여부를 검토합니다.";
 "perm.desc.bypassPermissions" = "모든 권한 확인 및 안전 장치를 건너뜁니다. 인터넷이 차단된 컨테이너나 VM 환경에서만 사용하세요.";
+"perm.desc.fullAccess" = "모든 도구 호출을 확인 없이 자동 승인합니다. 모든 Bash 명령, 파일 편집, 네트워크 요청이 허용됩니다. 완전히 신뢰하는 프로젝트에서만 사용하세요.";
 
 // MARK: - Effort Level Descriptions
 "effort.desc.auto" = "활성 모델과 플랜에 따라 자동으로 결정되는 모델 기본값을 사용합니다.";

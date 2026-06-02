@@ -173,10 +173,20 @@
 "File" = "File";
 "Input" = "Input";
 "Auto-deny in %@" = "Auto-deny in %@";
+"No auto-deny" = "No auto-deny";
 "Deny" = "Deny";
 "Allow" = "Allow";
 "Allow this tool for the session" = "Allow this tool for the session";
 "Always allow this command" = "Always allow this command";
+
+// MARK: - Auto-deny timeout (Settings)
+"Permission Auto-Deny" = "Permission Auto-Deny";
+"Auto-deny after" = "Auto-deny after";
+"How long a pending permission request waits for your decision before Clarc denies it automatically. Choose a longer window or “Don’t auto-deny” if you step away from the keyboard." = "How long a pending permission request waits for your decision before Clarc denies it automatically. Choose a longer window or “Don’t auto-deny” if you step away from the keyboard.";
+"5 minutes" = "5 minutes";
+"10 minutes" = "10 minutes";
+"30 minutes" = "30 minutes";
+"Don't auto-deny" = "Don't auto-deny";
 
 // MARK: - OnboardingView
 "Claude CLI Installation Check" = "Claude CLI Installation Check";
@@ -216,6 +226,7 @@
 "perm.desc.plan" = "Read-only mode. Claude researches and proposes a plan without making any changes. Same prompts as default for other actions.";
 "perm.desc.auto" = "Runs without permission prompts. A background classifier reviews each action for safety before it executes.";
 "perm.desc.bypassPermissions" = "Skips all permission checks and safety gates. Use only in isolated containers or VMs without internet access.";
+"perm.desc.fullAccess" = "Auto-approves every tool call without any prompts. Every Bash command, file edit, and network request is allowed. Use only on projects you fully trust.";
 
 // MARK: - Effort Level Descriptions
 "effort.desc.auto" = "Uses the model's default effort level, chosen automatically based on the active model and plan.";

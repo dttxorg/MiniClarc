@@ -126,11 +126,15 @@ struct PermissionModal: View {
                 .foregroundStyle(ClaudeTheme.textTertiary)
 
             if appState.autoDenyTimeout.isUnlimited {
-                Text("No auto-deny")
+                Text(LocalizedStringKey("No auto-deny"))
                     .font(.caption)
                     .foregroundStyle(ClaudeTheme.textTertiary)
             } else {
-                Text("Auto-deny in \(formattedTime)")
+                // Use String(format:) with the localized format key so the %@
+                // specifier is preserved. A plain `Text("Auto-deny in \(...)")`
+                // would interpolate the value into the key itself and miss
+                // the lookup, falling back to the English literal.
+                Text(String(format: String(localized: "Auto-deny in %@"), formattedTime))
                     .font(.caption)
                     .foregroundStyle(ClaudeTheme.textTertiary)
             }

@@ -187,17 +187,20 @@ struct GeneralSettingsTab: View {
 
     private func permissionSection(timeout: Binding<AutoDenyTimeout>) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Permission Auto-Deny")
+            Text(LocalizedStringKey("Permission Auto-Deny"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Picker("Auto-deny after", selection: timeout) {
+            Picker(LocalizedStringKey("Auto-deny after"), selection: timeout) {
                 ForEach(AutoDenyTimeout.allCases, id: \.self) { value in
-                    Text(value.displayName).tag(value)
+                    // Wrap in LocalizedStringKey so the localized
+                    // displayName (e.g. "5 minutes" / "5 分钟") is
+                    // resolved from Localizable.strings.
+                    Text(LocalizedStringKey(value.displayName)).tag(value)
                 }
             }
             .pickerStyle(.menu)
 
-            Text("How long a pending permission request waits for your decision before Clarc denies it automatically. Choose a longer window or “Don’t auto-deny” if you step away from the keyboard.")
+            Text(LocalizedStringKey("How long a pending permission request waits for your decision before Clarc denies it automatically. Choose a longer window or “Don’t auto-deny” if you step away from the keyboard."))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -376,6 +379,8 @@ struct ChatSettingsTab: View {
                 Divider()
                 focusModeSection
                 Divider()
+                foldThresholdSection
+                Divider()
                 autoPreviewSection
             }
             .padding(24)
@@ -481,6 +486,30 @@ struct ChatSettingsTab: View {
             }
             .toggleStyle(.switch)
             .fixedSize()
+        }
+    }
+
+    // MARK: - Fold Threshold Section
+
+    private var foldThresholdSection: some View {
+        @Bindable var appState = appState
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Fold older messages")
+                .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
+
+            Picker(LocalizedStringKey("Fold older messages"), selection: $appState.foldThreshold) {
+                Text("Fold: 8").tag(8)
+                Text("Fold: 15").tag(15)
+                Text("Fold: 30").tag(30)
+                Text("Fold: Off").tag(0)
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+
+            Text(LocalizedStringKey("Fold threshold description"))
+                .font(.system(size: ClaudeTheme.size(11)))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
