@@ -139,24 +139,67 @@ actor MarketplaceService {
 
     // MARK: - Installation (via Claude Code CLI)
 
-    /// Retrieve the list of installed plugin names.
+    /// Retrieve the set of installed plugin names from `~/.claude/plugins/installed_plugins.json`.
+    ///
+    /// The on-disk format (Claude Code v2.x) is:
+    /// ```json
+    /// {
+    ///   "version": 2,
+    ///   "plugins": {
+    ///     "<plugin>@<marketplace>": [
+    ///       { "scope": "user", "version": "x.y.z", "installedAt": "...", ... }
+    ///     ]
+    ///   }
+    /// }
+    /// ```
+    /// Keys are `"<name>@<marketplace>"` — the exact same form that
+    /// `claude plugin install <name>@<marketplace>` takes. We strip the
+    /// `@<marketplace>` suffix so the UI matches by plugin name alone.
     func installedPluginNames() async -> Set<String> {
-        let (output, exitCode) = await runCLI(["plugin", "list", "--json"])
-        guard exitCode == 0,
-              let data = output.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            return installedPluginNamesFromDisk()
-        }
-        return Set(json.compactMap { $0["name"] as? String })
+        let names = installedPluginNamesFromDisk()
+        if !names.isEmpty { return names }
+        return await installedPluginNamesFromCLI()
+    }
+
+    private func installedPluginNamesFromCLI() async -> Set<String> {
+        let (output, exitCode) = await runCLI(["plugin", "list"])
+        guard exitCode == 0 else { return [] }
+        // Output is plain text, one plugin per line. Plugin name may or may
+        // not have a `@<marketplace>` suffix depending on the CLI version.
+        return Set(
+            output.split(whereSeparator: { $0.isNewline || $0.isWhitespace })
+                .map(String.init)
+                .filter { !$0.isEmpty }
+                .map { $0.contains("@") ? String($0.split(separator: "@").first ?? Substring($0)) : $0 }
+        )
     }
 
     private func installedPluginNamesFromDisk() -> Set<String> {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let fileURL = URL(fileURLWithPath: "\(home)/.claude/plugins/installed_plugins.json")
+        guard let data = try? Data(contentsOf: fileURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let plugins = json["plugins"] as? [String: [Any]] else {
+            // Fallback: list subdirectories of the known plugin roots.
+            return installedPluginNamesFromDirectoryScan()
+        }
+        // Keys are "<name>@<marketplace>"; strip the suffix.
+        return Set(plugins.keys.compactMap { key in
+            key.split(separator: "@").first.map(String.init)
+        })
+    }
+
+    private func installedPluginNamesFromDirectoryScan() -> Set<String> {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let fm = FileManager.default
         var names: Set<String> = []
         for dir in ["\(home)/.claude/plugins", "\(home)/.claude/skills"] {
             if let entries = try? fm.contentsOfDirectory(atPath: dir) {
-                names.formUnion(entries.filter { !$0.hasPrefix(".") })
+                for entry in entries where !entry.hasPrefix(".") {
+                    // Strip the @<marketplace> suffix if present.
+                    let name = entry.split(separator: "@").first.map(String.init) ?? entry
+                    names.insert(name)
+                }
             }
         }
         return names

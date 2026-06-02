@@ -247,6 +247,13 @@
 "perm.desc.bypassPermissions" = "跳过所有权限检查和安全网关。仅在无网络访问的隔离容器或虚拟机中使用。";
 "perm.desc.fullAccess" = "自动批准所有工具调用,不再弹出任何提示。任何 Bash 命令、文件编辑与网络请求都被放行。仅在完全信任的项目上使用。";
 
+// MARK: - 用量端点
+"Usage Endpoint" = "用量查询端点";
+"Use custom usage endpoint" = "使用自定义用量查询端点";
+"Endpoint URL" = "端点 URL";
+"Bearer token (optional)" = "Bearer 令牌(可选)";
+"usage.endpoint.desc" = "默认情况下 MiniClarc 用您的 OAuth 访问令牌查询 Anthropic 官方的 oauth/usage 端点。开启开关后可指向自定义 URL,该 URL 的响应必须与 Anthropic 协议兼容(JSON 顶层包含 five_hour 与 seven_day 两个键,各自有 utilization 0-100 数值与可选的 ISO 8601 resets_at 字符串)。";
+
 
 // MARK: - Effort Level Descriptions
 "effort.desc.auto" = "使用模型默认的思考强度,由当前模型和订阅自动决定。";

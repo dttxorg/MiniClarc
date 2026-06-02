@@ -76,6 +76,8 @@ struct GeneralSettingsTab: View {
                 Divider()
                 permissionSection(timeout: $appState.autoDenyTimeout)
                 Divider()
+                usageEndpointSection
+                Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     skillMarketSection
                     helpSection
@@ -207,6 +209,80 @@ struct GeneralSettingsTab: View {
             .pickerStyle(.menu)
 
             Text(LocalizedStringKey("How long a pending permission request waits for your decision before Clarc denies it automatically. Choose a longer window or “Don’t auto-deny” if you step away from the keyboard."))
+                .font(.system(size: ClaudeTheme.size(11)))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Usage Endpoint Section
+
+    /// Settings for the rate-limit / usage data source. Default is the
+    /// Anthropic oauth/usage endpoint, fetched with the user's OAuth token.
+    /// Power users can point at a custom URL whose response is JSON
+    /// compatible with Anthropic's payload schema.
+    private var usageEndpointSection: some View {
+        @Bindable var appState = appState
+        let isCustom = (appState.usageEndpoint?.isEmpty == false)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(LocalizedStringKey("Usage Endpoint"))
+                .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
+
+            Toggle(isOn: Binding(
+                get: { isCustom },
+                set: { newValue in
+                    if newValue {
+                        // Pre-fill with a placeholder if the user enables
+                        // the toggle without typing a URL yet.
+                        if appState.usageEndpoint == nil {
+                            appState.usageEndpoint = "https://"
+                        }
+                    } else {
+                        // Disable: clear the URL (token is left as-is so
+                        // re-enabling doesn't lose the user's secret).
+                        appState.usageEndpoint = ""
+                    }
+                }
+            )) {
+                Text("Use custom usage endpoint")
+            }
+            .toggleStyle(.switch)
+            .fixedSize()
+
+            if isCustom {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey("Endpoint URL"))
+                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "https://your-server/usage",
+                        text: Binding(
+                            get: { appState.usageEndpoint ?? "" },
+                            set: { appState.usageEndpoint = $0 }
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey("Bearer token (optional)"))
+                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
+                        .foregroundStyle(.secondary)
+                    SecureField(
+                        "sk-...",
+                        text: Binding(
+                            get: { appState.usageEndpointBearerToken ?? "" },
+                            set: { appState.usageEndpointBearerToken = $0 }
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                }
+            }
+
+            Text(LocalizedStringKey("usage.endpoint.desc"))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

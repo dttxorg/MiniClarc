@@ -249,6 +249,44 @@ final class AppState {
         didSet { UserDefaults.standard.set(foldThreshold, forKey: "foldThreshold") }
     }
 
+    // MARK: - Custom Rate-Limit / Usage Endpoint
+
+    /// Optional user-supplied URL for fetching rate-limit usage. When nil
+    /// (the default), Clarc hits the official Anthropic oauth/usage
+    /// endpoint with the user's OAuth access token.
+    ///
+    /// When set, the response must be JSON compatible with Anthropic's
+    /// payload schema (see `RateLimitService.callAPI`).
+    ///
+    /// Persisted in UserDefaults. Stored as a plain string (rather than
+    /// Keychain) because the URL is not a secret on its own — pair it
+    /// with `usageEndpointBearerToken` for auth.
+    var usageEndpoint: String? {
+        get { UserDefaults.standard.string(forKey: "usageEndpoint") }
+        set {
+            if let newValue, !newValue.isEmpty {
+                UserDefaults.standard.set(newValue, forKey: "usageEndpoint")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "usageEndpoint")
+            }
+        }
+    }
+
+    /// Optional bearer token for the custom usage endpoint. Sent in the
+    /// `Authorization: Bearer <token>` header. Ignored when `usageEndpoint`
+    /// is nil. UserDefaults for simplicity — users who care about secret
+    /// hygiene can leave it empty and use a public endpoint.
+    var usageEndpointBearerToken: String? {
+        get { UserDefaults.standard.string(forKey: "usageEndpointBearerToken") }
+        set {
+            if let newValue, !newValue.isEmpty {
+                UserDefaults.standard.set(newValue, forKey: "usageEndpointBearerToken")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "usageEndpointBearerToken")
+            }
+        }
+    }
+
     // MARK: - Permission Auto-Deny Timeout
 
     /// How long a pending permission request waits for user input before
@@ -666,7 +704,10 @@ final class AppState {
             await self.forkFromHere(messageId: messageId, in: window)
         }
         bridge.fetchRateLimitHandler = {
-            await RateLimitService.shared.fetchUsage()
+            await RateLimitService.shared.fetchUsage(
+                customEndpoint: self.usageEndpoint,
+                customBearerToken: self.usageEndpointBearerToken
+            )
         }
 
         startBridgeObservation(bridge, for: window)
@@ -2483,7 +2524,9 @@ final class AppState {
         do {
             try await marketplace.installPlugin(plugin)
             marketplacePluginStates[plugin.id] = .installed
-            marketplaceInstalledNames.insert(plugin.name)
+            // Re-read installed_plugins.json so the UI matches the on-disk
+            // truth (handles multi-marketplace installs of the same name).
+            await loadMarketplace(forceRefresh: true)
         } catch {
             marketplacePluginStates[plugin.id] = .failed(error.localizedDescription)
             logger.error("Failed to install plugin \(plugin.name): \(error.localizedDescription)")
@@ -2493,8 +2536,10 @@ final class AppState {
     func uninstallMarketplacePlugin(_ plugin: MarketplacePlugin) async {
         do {
             try await marketplace.uninstallPlugin(plugin)
-            marketplaceInstalledNames.remove(plugin.name)
             marketplacePluginStates[plugin.id] = .notInstalled
+            // Re-read installed_plugins.json to drop the just-removed name
+            // from marketplaceInstalledNames.
+            await loadMarketplace(forceRefresh: true)
         } catch {
             logger.error("Failed to uninstall plugin \(plugin.name): \(error.localizedDescription)")
         }

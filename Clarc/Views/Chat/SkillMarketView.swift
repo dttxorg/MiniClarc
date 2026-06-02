@@ -33,8 +33,8 @@ struct SkillMarketView: View {
                 plugin: plugin,
                 isInstalled: appState.marketplaceInstalledNames.contains(plugin.name),
                 installStatus: appState.marketplacePluginStates[plugin.id] ?? .notInstalled,
-                onInstall: {},
-                onUninstall: {}
+                onInstall: { Task { await appState.installMarketplacePlugin(plugin) } },
+                onUninstall: { Task { await appState.uninstallMarketplacePlugin(plugin) } }
             )
             .focusable(false)
         }
@@ -462,13 +462,7 @@ struct PluginDetailView: View {
     @ViewBuilder
     private var removeButton: some View {
         Button("Remove") {
-            terminalState = InteractiveTerminalState(
-                title: "Uninstall \(plugin.name)",
-                executable: "/bin/zsh",
-                arguments: ["-il"],
-                initialCommand: "claude plugin uninstall \(plugin.name)",
-                reportToChat: false
-            )
+            onUninstall()
         }
         .font(.system(size: ClaudeTheme.size(12), weight: .medium))
         .foregroundStyle(Color.red)
@@ -495,24 +489,12 @@ struct PluginDetailView: View {
             removeButton
         case .failed:
             Button("Retry") {
-                terminalState = InteractiveTerminalState(
-                    title: "Install \(plugin.name)",
-                    executable: "/bin/zsh",
-                    arguments: ["-il"],
-                    initialCommand: "claude plugin install \(plugin.name)@\(plugin.marketplace)",
-                    reportToChat: false
-                )
+                onInstall()
             }
             .buttonStyle(.borderedProminent)
         default:
             Button("Install") {
-                terminalState = InteractiveTerminalState(
-                    title: "Install \(plugin.name)",
-                    executable: "/bin/zsh",
-                    arguments: ["-il"],
-                    initialCommand: "claude plugin install \(plugin.name)@\(plugin.marketplace)",
-                    reportToChat: false
-                )
+                onInstall()
             }
             .buttonStyle(.borderedProminent)
         }

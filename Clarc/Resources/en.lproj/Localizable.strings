@@ -228,6 +228,13 @@
 "perm.desc.bypassPermissions" = "Skips all permission checks and safety gates. Use only in isolated containers or VMs without internet access.";
 "perm.desc.fullAccess" = "Auto-approves every tool call without any prompts. Every Bash command, file edit, and network request is allowed. Use only on projects you fully trust.";
 
+// MARK: - Usage Endpoint
+"Usage Endpoint" = "Usage Endpoint";
+"Use custom usage endpoint" = "Use custom usage endpoint";
+"Endpoint URL" = "Endpoint URL";
+"Bearer token (optional)" = "Bearer token (optional)";
+"usage.endpoint.desc" = "By default MiniClarc queries the official Anthropic oauth/usage endpoint with your OAuth access token. Enable the toggle to point at a custom URL whose response is JSON compatible with Anthropic's payload (keys: five_hour and seven_day, each with utilization 0-100 and optional ISO 8601 resets_at).";
+
 // MARK: - Effort Level Descriptions
 "effort.desc.auto" = "Uses the model's default effort level, chosen automatically based on the active model and plan.";
 "effort.desc.low" = "Reserve for short, scoped, latency-sensitive tasks that are not intelligence-sensitive.";

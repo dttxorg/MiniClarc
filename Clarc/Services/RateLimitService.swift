@@ -19,9 +19,36 @@ actor RateLimitService {
     private let cacheTTL: TimeInterval = 300  // 5 minutes
     private var authFailed = false
 
-    func fetchUsage(forceRefresh: Bool = false) async -> RateLimitUsage? {
+    /// Fetch current rate-limit usage.
+    ///
+    /// - Parameters:
+    ///   - forceRefresh: bypass the 5-minute cache when true.
+    ///   - customEndpoint: when non-nil, use this URL instead of the default
+    ///     Anthropic oauth/usage endpoint. The custom URL's response must be
+    ///     JSON compatible with Anthropic's payload (keys: `five_hour` and
+    ///     `seven_day`, each with `utilization` (number 0-100) and optional
+    ///     `resets_at` (ISO 8601 string)).
+    ///   - customBearerToken: when `customEndpoint` is set, this token is sent
+    ///     in the `Authorization: Bearer <token>` header. Ignored when
+    ///     `customEndpoint` is nil (the default endpoint always uses the
+    ///     OAuth access token read from Keychain).
+    func fetchUsage(
+        forceRefresh: Bool = false,
+        customEndpoint: String? = nil,
+        customBearerToken: String? = nil
+    ) async -> RateLimitUsage? {
         if !forceRefresh, let c = cached, let at = cachedAt, Date().timeIntervalSince(at) < cacheTTL {
             return c
+        }
+
+        // Custom endpoint path: skip OAuth / Keychain entirely. The user
+        // supplied their own URL and bearer; we just hit it.
+        if let endpoint = customEndpoint, !endpoint.isEmpty {
+            return await callAPI(
+                token: customBearerToken ?? "",
+                urlOverride: endpoint,
+                isCustom: true
+            )
         }
 
         if authFailed && !forceRefresh {
@@ -50,7 +77,7 @@ actor RateLimitService {
 
         logger.info("[RateLimit] Token ready, calling API...")
 
-        guard let usage = await callAPI(token: accessToken) else {
+        guard let usage = await callAPI(token: accessToken, urlOverride: nil, isCustom: false) else {
             logger.debug("[RateLimit] API call returned nil")
             return cached
         }
@@ -139,28 +166,51 @@ actor RateLimitService {
 
     // MARK: - API
 
-    private func callAPI(token: String) async -> RateLimitUsage? {
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else { return nil }
+    /// Hit either the default Anthropic oauth/usage endpoint or a user-supplied
+    /// custom endpoint. The response schema is identical in both cases:
+    /// `{ "five_hour": { "utilization": <0-100>, "resets_at": "..." },
+    ///    "seven_day": { "utilization": <0-100>, "resets_at": "..." } }`
+    ///
+    /// - Parameters:
+    ///   - token: bearer token. Required for the default endpoint (OAuth
+    ///     access token); optional for custom endpoints (skipped if empty).
+    ///   - urlOverride: when non-nil, use this URL instead of the default
+    ///     Anthropic endpoint.
+    ///   - isCustom: true when `urlOverride` is a user-supplied custom URL.
+    ///     In that case we do not send the `anthropic-beta` header (which
+    ///     is Anthropic-specific) and do not auth-fail on 401.
+    private func callAPI(token: String, urlOverride: String?, isCustom: Bool) async -> RateLimitUsage? {
+        let resolvedURL: String = urlOverride ?? "https://api.anthropic.com/api/oauth/usage"
+        guard let url = URL(string: resolvedURL) else {
+            logger.warning("[RateLimit] Invalid URL: \(resolvedURL, privacy: .public)")
+            return nil
+        }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        if !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        // Only the default Anthropic endpoint understands the beta header.
+        if !isCustom {
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        }
         request.timeoutInterval = 10
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                if code == 401 {
+                if code == 401 && !isCustom {
                     logger.debug("[RateLimit] API returned 401 — token invalid")
                     authFailed = true
                 } else {
-                    logger.warning("[RateLimit] API returned status \(code)")
+                    logger.warning("[RateLimit] API returned status \(code) for \(isCustom ? "custom" : "default") endpoint")
                 }
                 return nil
             }
 
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                logger.warning("[RateLimit] Response is not a JSON object")
                 return nil
             }
 
