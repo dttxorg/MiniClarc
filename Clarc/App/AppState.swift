@@ -36,6 +36,13 @@ struct SessionStreamState {
     /// information; the summaries are a presentation cache).
     var phaseSummaries: [PhaseSummary] = []
 
+    /// The window that owns this session's stream. Set in
+    /// `setupChatBridge` so streaming closures can read the per-window
+    /// `taskProgressStore` (and any future per-window resources).
+    /// Optional because some test fixtures and library callers build
+    /// `SessionStreamState` directly.
+    weak var windowState: WindowState?
+
     /// The full message list for rendering and saving.
     var allMessages: [ChatMessage] {
         committedMessages + (streamingTail?.messages ?? []) + localAddendum
@@ -738,6 +745,9 @@ final class AppState {
     /// Configures a `ChatBridge`'s action handlers and starts an observation loop that keeps
     /// the bridge's state properties in sync with the underlying `sessionStates`.
     func setupChatBridge(_ bridge: ChatBridge, for window: WindowState) {
+        let sessionKey = window.currentSessionId ?? window.newSessionKey
+        sessionStates[sessionKey]?.windowState = window
+
         bridge.sendHandler = { [weak self, weak window] in
             guard let self, let window else { return }
             await self.send(in: window)
@@ -1821,6 +1831,13 @@ final class AppState {
             let buffered = tail.textDeltaBuffer
             tail.textDeltaBuffer = ""
 
+            // Try to extract any task_update JSON / XML blocks from the
+            // buffered text. Extracted updates go to the per-window
+            // TaskProgressStore and into the message's blocks; whatever
+            // is left becomes the text-block content.
+            let (extractedUpdates, remainingText) = TaskUpdateParser.extract(from: buffered)
+            let store = state.windowState?.taskProgressStore
+
             if tail.needsNewMessage {
                 if let idx = tail.messages.indices.last(where: { tail.messages[$0].isStreaming }) {
                     tail.messages[idx].isStreaming = false
@@ -1828,11 +1845,24 @@ final class AppState {
                     Self.stripNoOpText(at: idx, in: &tail.messages)
                 }
                 tail.needsNewMessage = false
-                tail.messages.append(ChatMessage(role: .assistant, content: buffered, isStreaming: true))
+                tail.messages.append(ChatMessage(role: .assistant, content: remainingText, isStreaming: true))
             } else if let idx = tail.messages.indices.last(where: { tail.messages[$0].isStreaming && tail.messages[$0].role == .assistant }) {
-                tail.messages[idx].appendText(buffered)
+                // Route extracted task_updates into the store and the message blocks
+                if let store {
+                    for parsed in extractedUpdates {
+                        let (wasNew, merged) = store.upsert(parsed)
+                        if wasNew {
+                            tail.messages[idx].blocks.append(.taskUpdate(merged))
+                        } else if let blockIdx = tail.messages[idx].blocks.firstIndex(where: { $0.taskUpdate?.id == merged.id }) {
+                            tail.messages[idx].blocks[blockIdx].taskUpdate = merged
+                        }
+                    }
+                }
+                if !remainingText.isEmpty {
+                    tail.messages[idx].appendText(remainingText)
+                }
             } else {
-                tail.messages.append(ChatMessage(role: .assistant, content: buffered, isStreaming: true))
+                tail.messages.append(ChatMessage(role: .assistant, content: remainingText, isStreaming: true))
             }
         }
 
