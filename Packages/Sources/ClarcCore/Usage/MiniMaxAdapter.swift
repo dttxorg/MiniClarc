@@ -38,8 +38,23 @@ public struct MiniMaxAdapter: UsageAdapter {
         httpStatus: Int,
         endpointURL: String
     ) throws -> UsageFetchOutcome {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let arr = root["model_remains"] as? [[String: Any]],
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw UsageError.malformedJSON
+        }
+
+        // MiniMax returns HTTP 200 with a non-zero `base_resp.status_code`
+        // for business-level failures (e.g. 1004 = auth fail). Surface
+        // those as a typed `http` error so the Test Endpoint sheet shows
+        // the actual message from the server instead of a vague
+        // "Missing field: model_remains" (which is what the user sees
+        // when the auth fails today).
+        if let baseResp = root["base_resp"] as? [String: Any],
+           let statusCode = baseResp["status_code"] as? Int,
+           statusCode != 0 {
+            throw UsageError.http(status: statusCode, body: data)
+        }
+
+        guard let arr = root["model_remains"] as? [[String: Any]],
               let element = pickElement(arr) else {
             throw UsageError.missingField("model_remains")
         }
