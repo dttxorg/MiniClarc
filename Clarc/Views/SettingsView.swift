@@ -352,8 +352,14 @@ struct GeneralSettingsTab: View {
     private func applyProviderDefaults(_ provider: UsageProvider, appState: AppState) {
         switch provider {
         case .anthropic:
-            // Clear user path overrides so the next Anthropic fetch uses
-            // the built-in defaults.
+            // Clear user path overrides and the endpoint URL so the next
+            // Anthropic fetch uses the built-in defaults from
+            // `UsageProvider.anthropic`. Without clearing the endpoint,
+            // a URL left over from a previous (custom / MiniMax) provider
+            // would still flow through `RateLimitService.fetchUsage`,
+            // making the picker feel "locked" to whatever was selected
+            // last.
+            appState.usageEndpoint = nil
             appState.usageEndpointFiveHourPath = nil
             appState.usageEndpointSevenDayPath = nil
         case .minimax:

@@ -28,7 +28,6 @@ struct ProjectWindowValue: Codable, Hashable {
 struct ClarcApp: App {
     @State private var appState = AppState()
     @FocusedValue(\.startNewChat) private var startNewChat
-    private let updateService = UpdateService.shared
 
     var body: some Scene {
         WindowGroup {
@@ -45,9 +44,10 @@ struct ClarcApp: App {
                 .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .appInfo) {
-                Button("Check for Updates...") {
-                    updateService.checkForUpdates()
-                }
+                // No "Check for Updates..." entry — this hard fork
+                // does not run Sparkle. Users update by downloading
+                // a new build from
+                // https://github.com/dttxorg/MiniClarc/releases.
             }
             CommandMenu("Theme") {
                 ForEach(AppTheme.allCases) { theme in
