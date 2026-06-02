@@ -1162,6 +1162,17 @@ final class AppState {
                         state.streamingTail!.messages[idx].duration = Date().timeIntervalSince(start)
                     }
                     Self.stripNoOpText(at: idx, in: &state.streamingTail!.messages)
+
+                    // Build a per-turn roll-up summary for the just-finished
+                    // turn. Pushed to ChatBridge.phaseSummaries for the UI to
+                    // render as a collapsible card. See `PhaseSummary` for
+                    // the per-turn model.
+                    let summary = Self.makePhaseSummary(
+                        forMessage: state.streamingTail!.messages[idx],
+                        previousSummaries: state.phaseSummaries,
+                        streamingStartDate: state.streamingStartDate
+                    )
+                    state.phaseSummaries.append(summary)
                 }
             }
 
@@ -1169,6 +1180,103 @@ final class AppState {
 
             state.streamingStartDate = nil
         }
+    }
+
+    /// Construct a PhaseSummary from the just-finalized assistant message.
+    ///
+    /// The summary is a presentation cache; the source of truth for
+    /// "what happened in this turn" remains the underlying ChatMessage
+    /// array (carried by `summary.messageIDs`). Re-deriving from the
+    /// message each turn is cheap (a few `toolCall`s, one text block)
+    /// and avoids the source-of-truth drift you'd get from a parallel
+    /// accumulator.
+    private static func makePhaseSummary(
+        forMessage message: ChatMessage,
+        previousSummaries: [PhaseSummary],
+        streamingStartDate: Date?
+    ) -> PhaseSummary {
+        let invocations: [PhaseSummary.ToolInvocation] = message.toolCalls.map { tc in
+            let status: PhaseSummary.ToolInvocation.Status
+            if tc.isError { status = .failed }
+            else if tc.result == nil { status = .unverified }
+            else { status = .succeeded }
+            return PhaseSummary.ToolInvocation(
+                name: tc.name,
+                inputSummary: Self.summarizeToolInput(tc),
+                status: status
+            )
+        }
+
+        let unverifiedCount = invocations.filter { $0.status == .unverified }.count
+        let failedCount = invocations.filter { $0.status == .failed }.count
+        let readyForReview = (failedCount == 0 && unverifiedCount == 0)
+
+        // The last text block carries the assistant's final reply; we
+        // scan it for a "next step" suggestion.
+        let finalText = message.blocks.reversed().compactMap { $0.text }.first ?? ""
+        let suggestedNext = PhaseSummary.extractSuggestedNext(from: finalText)
+
+        let changeSummary = PhaseSummary.summarizeChanges(from: invocations)
+
+        // Best-effort wall-clock bounds. streamingStartDate is cleared
+        // immediately after this method runs, so capture it now.
+        let endedAt = Date()
+        let startedAt = streamingStartDate ?? message.timestamp
+        let duration = max(0, endedAt.timeIntervalSince(startedAt))
+
+        return PhaseSummary(
+            phaseIndex: previousSummaries.count,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            durationSeconds: duration,
+            toolInvocations: invocations,
+            unverifiedCommandCount: unverifiedCount,
+            failedInvocationCount: failedCount,
+            readyForReview: readyForReview,
+            changeSummary: changeSummary,
+            suggestedNext: suggestedNext,
+            messageIDs: [message.id]
+        )
+    }
+
+    /// Extract a short human-readable input summary from a single tool
+    /// call. Edit / Write / Read: file path. Bash: command head.
+    /// WebFetch: URL. Falls back to "(no input)".
+    private static func summarizeToolInput(_ toolCall: ToolCall) -> String {
+        let name = toolCall.name.lowercased()
+        let input = toolCall.input
+
+        func stringValue(for keys: [String]) -> String? {
+            for key in keys {
+                if case .string(let s) = input[key], !s.isEmpty { return s }
+            }
+            return nil
+        }
+
+        let pathLikeNames: Set<String> = ["edit", "write", "multiedit", "multi_edit", "read", "notebookedit"]
+        if pathLikeNames.contains(name) {
+            if let path = stringValue(for: ["file_path", "notebook_path"]) {
+                return path
+            }
+        }
+        if name == "bash" {
+            if let cmd = stringValue(for: ["command"]) {
+                let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.count > 80
+                    ? String(trimmed.prefix(77)) + "..."
+                    : trimmed
+            }
+        }
+        if name == "webfetch" || name == "websearch" {
+            if let url = stringValue(for: ["url", "query"]) { return url }
+        }
+        if name == "glob" {
+            if let pattern = stringValue(for: ["pattern"]) { return pattern }
+        }
+        if name == "grep" {
+            if let pattern = stringValue(for: ["pattern"]) { return pattern }
+        }
+        return "(no input)"
     }
 
     /// Drop "No response requested." text blocks from the assistant message
