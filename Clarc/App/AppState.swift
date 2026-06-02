@@ -1823,6 +1823,22 @@ final class AppState {
             if let idx = tail.messages.indices.last(where: { tail.messages[$0].role == .assistant }) {
                 for (toolUseId, content, isError) in results {
                     tail.messages[idx].setToolResult(id: toolUseId, result: content, isError: isError)
+                    // Finalize the matching TaskUpdate card in place
+                    // (running → done / failed). The card's id is the
+                    // tool's id, so a UUID lookup is enough.
+                    if let toolUUID = UUID(uuidString: toolUseId),
+                       let store = state.windowState?.taskProgressStore,
+                       var existing = store.tasks[toolUUID] {
+                        existing = TaskUpdateMessageFactory.finalize(
+                            from: existing,
+                            result: content,
+                            isError: isError
+                        )
+                        store.upsert(existing)
+                        if let tuIdx = tail.messages[idx].blocks.firstIndex(where: { $0.taskUpdate?.id == toolUUID }) {
+                            tail.messages[idx].blocks[tuIdx].taskUpdate = existing
+                        }
+                    }
                 }
             }
         }
@@ -1915,6 +1931,22 @@ final class AppState {
                     if let lastIndex = state.streamingTail!.messages.indices.last,
                        state.streamingTail!.messages[lastIndex].role == .assistant {
                         state.streamingTail!.messages[lastIndex].appendToolCall(toolCall)
+                        // Emit a Codex-style phase card for this tool.
+                        // The card's id is the tool's id (a UUID), so
+                        // when the result arrives we find the same
+                        // block in place and update it from running
+                        // to done/failed. Input is not yet complete at
+                        // this point; the input_json_delta finalizer
+                        // below enriches the card with the parsed
+                        // input's summary/details/filesChanged.
+                        if let store = state.windowState?.taskProgressStore {
+                            let running = TaskUpdateMessageFactory.makeRunning(
+                                name: name,
+                                id: id
+                            )
+                            let (_, merged) = store.upsert(running)
+                            state.streamingTail!.messages[lastIndex].blocks.append(.taskUpdate(merged))
+                        }
                     }
                     // Ready to receive input_json_delta
                     state.streamingTail!.activeToolId = id
@@ -2015,6 +2047,26 @@ final class AppState {
                 if let msgIdx = state.streamingTail!.messages.indices.reversed().first(where: { state.streamingTail!.messages[$0].role == .assistant && state.streamingTail!.messages[$0].isStreaming }),
                    let blockIdx = state.streamingTail!.messages[msgIdx].toolCallIndex(id: toolId) {
                     state.streamingTail!.messages[msgIdx].blocks[blockIdx].toolCall?.input = parsed
+                    // Now that the parsed input is attached, enrich
+                    // the running TaskUpdate card with the real
+                    // summary, details, and file list. Look up the
+                    // card by its id (which is the tool's id, a UUID).
+                    if let store = state.windowState?.taskProgressStore,
+                       let toolUUID = UUID(uuidString: toolId) {
+                        let existingStart = store.tasks[toolUUID]?.startTime
+                        let name = state.streamingTail!.messages[msgIdx].blocks[blockIdx].toolCall?.name ?? ""
+                        let updated = TaskUpdateMessageFactory.makeWithInput(
+                            name: name,
+                            id: toolId,
+                            input: parsed,
+                            existingStartTime: existingStart
+                        )
+                        let (_, merged) = store.upsert(updated)
+                        // Replace the existing running card in place.
+                        if let tuIdx = state.streamingTail!.messages[msgIdx].blocks.firstIndex(where: { $0.taskUpdate?.id == toolUUID }) {
+                            state.streamingTail!.messages[msgIdx].blocks[tuIdx].taskUpdate = merged
+                        }
+                    }
                 }
             }
 
