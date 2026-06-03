@@ -20,25 +20,25 @@ struct SettingsView: View {
         TabView(selection: $selectedTab) {
             GeneralSettingsTab(showUserManual: $showUserManual)
                 .tabItem {
-                    Label("General", systemImage: "slider.horizontal.3")
+                    Label("通用", systemImage: "slider.horizontal.3")
                 }
                 .tag(0)
 
             ChatSettingsTab()
                 .tabItem {
-                    Label("Message", systemImage: "bubble.left.and.bubble.right")
+                    Label("聊天", systemImage: "bubble.left.and.bubble.right")
                 }
                 .tag(1)
 
             SlashCommandManagerView(isEmbedded: true)
                 .tabItem {
-                    Label("Slash Commands", systemImage: "terminal.fill")
+                    Label("斜杠命令", systemImage: "terminal.fill")
                 }
                 .tag(2)
 
             ShortcutManagerView(isEmbedded: true)
                 .tabItem {
-                    Label("Shortcuts", systemImage: "bolt.fill")
+                    Label("快捷按钮", systemImage: "bolt.fill")
                 }
                 .tag(3)
         }
@@ -571,7 +571,7 @@ struct GeneralSettingsTab: View {
                 Image(systemName: "book.fill")
                     .font(.system(size: ClaudeTheme.size(14)))
                     .frame(width: 20)
-                Text("User Guide")
+                Text("使用手册")
                     .font(.system(size: ClaudeTheme.size(13)))
                     .foregroundStyle(.primary)
                 Spacer()
@@ -624,10 +624,10 @@ struct ChatSettingsTab: View {
 
     private func modelSection(selectedModel: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Default Model")
+            Text("默认模型")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("Used for new sessions. You can override the model per session from the toolbar.")
+            Text("用于新会话。可在工具栏按会话单独覆盖。")
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
@@ -651,10 +651,10 @@ struct ChatSettingsTab: View {
     private var permissionModeSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Default Permission Mode")
+            Text("默认权限模式")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("Used for new sessions. You can override the permission mode per session from the toolbar.")
+            Text("用于新会话。可在工具栏按会话单独覆盖。")
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
@@ -678,15 +678,15 @@ struct ChatSettingsTab: View {
     private var effortSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Default Effort Level")
+            Text("默认努力程度")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("Used for new sessions. You can override the effort level per session from the toolbar.")
+            Text("用于新会话。可在工具栏按会话单独覆盖。")
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
             Picker("", selection: $appState.selectedEffort) {
-                Text("Auto").tag("auto")
+                Text("自动").tag("auto")
                 ForEach(AppState.availableEfforts, id: \.self) { effort in
                     Text(effortDisplayName(effort)).tag(effort)
                 }
@@ -706,7 +706,7 @@ struct ChatSettingsTab: View {
     private var focusModeSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Focus Mode")
+            Text("专注模式")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
             Text("focus.mode.desc")
@@ -747,7 +747,7 @@ struct ChatSettingsTab: View {
     private var foldThresholdSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Fold older messages")
+            Text("折叠较早消息")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
             Picker(LocalizedStringKey("Fold older messages"), selection: $appState.foldThreshold) {
@@ -771,7 +771,7 @@ struct ChatSettingsTab: View {
     private var autoPreviewSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Auto-preview Attachments")
+            Text("附件自动预览")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
             Text("auto.preview.desc")
