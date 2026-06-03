@@ -121,7 +121,7 @@ struct GeneralSettingsTab: View {
 
     private var fontSizeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Font Size")
+            Text("字体大小")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
             fontSizeRow(
                 label: "Interface",
@@ -153,7 +153,7 @@ struct GeneralSettingsTab: View {
                 .disabled(value <= ThemeStore.minFontSizeAdjustment)
             Group {
                 if value == 0 {
-                    Text("Default")
+                    Text("默认")
                 } else {
                     Text(verbatim: value > 0 ? "+\(value)" : "\(value)")
                 }
@@ -427,7 +427,7 @@ struct GeneralSettingsTab: View {
 
     private var themeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Theme")
+            Text("主题")
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
             Button {
@@ -487,10 +487,10 @@ struct GeneralSettingsTab: View {
                     .font(.system(size: ClaudeTheme.size(14)))
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Skill Marketplace")
+                    Text("技能市场")
                         .font(.system(size: ClaudeTheme.size(13)))
                         .foregroundStyle(.primary)
-                    Text("Browse and manage Claude Code skills")
+                    Text("浏览和管理 Claude Code 技能")
                         .font(.system(size: ClaudeTheme.size(11)))
                         .foregroundStyle(.secondary)
                 }
@@ -714,7 +714,7 @@ struct ChatSettingsTab: View {
                 .foregroundStyle(.secondary)
 
             Toggle(isOn: $appState.focusMode) {
-                Text("Enable Focus Mode")
+                Text("启用专注模式")
             }
             .toggleStyle(.switch)
             .fixedSize()
