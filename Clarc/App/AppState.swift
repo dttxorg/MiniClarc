@@ -2190,6 +2190,42 @@ final class AppState {
         }
     }
 
+    /// Cancel every streaming session across all projects. Used at
+    /// app termination and main-window close (when no other project
+    /// windows are open).
+    func cancelAllBackgroundStreams() async {
+        let ids = sessionStates.compactMap { $0.value.isStreaming ? $0.key : nil }
+        for sid in ids { await cancelBackgroundStream(for: sid) }
+    }
+
+    /// Cancel streaming sessions belonging to one specific project.
+    /// Used when the main window for a project closes but a dedicated
+    /// project window for the same project is still open.
+    func cancelBackgroundStreamsForProject(_ projectId: UUID) async {
+        let ids = sessionStates.compactMap { (key, state) -> String? in
+            guard state.isStreaming else { return nil }
+            // sessionStates keys are session ids; resolve projectId via
+            // allSessionSummaries. If we can't resolve a projectId for a
+            // streaming session (rare — e.g. summary not yet loaded), we
+            // conservatively keep the stream alive rather than kill it.
+            guard let summary = allSessionSummaries.first(where: { $0.id == key }) else { return nil }
+            return summary.projectId == projectId ? key : nil
+        }
+        for sid in ids { await cancelBackgroundStream(for: sid) }
+    }
+
+    /// Cancel streaming sessions NOT belonging to a specific project.
+    /// Used by selectProject() when the user has opted into
+    /// cancelBackgroundStreamsOnProjectSwitch.
+    func cancelBackgroundStreamsExcludingProject(_ projectId: UUID) async {
+        let ids = sessionStates.compactMap { (key, state) -> String? in
+            guard state.isStreaming else { return nil }
+            guard let summary = allSessionSummaries.first(where: { $0.id == key }) else { return nil }
+            return summary.projectId == projectId ? nil : key
+        }
+        for sid in ids { await cancelBackgroundStream(for: sid) }
+    }
+
     func cancelStreaming(in window: WindowState) async {
         let key = window.currentSessionId ?? window.newSessionKey
         let streamToCancel = sessionStates[key]?.activeStreamId
