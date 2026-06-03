@@ -609,6 +609,8 @@ struct ChatSettingsTab: View {
                 Divider()
                 focusModeSection
                 Divider()
+                backgroundTaskSection
+                Divider()
                 foldThresholdSection
                 Divider()
                 autoPreviewSection
@@ -716,6 +718,27 @@ struct ChatSettingsTab: View {
             }
             .toggleStyle(.switch)
             .fixedSize()
+        }
+    }
+
+    // MARK: - 后台任务 Section
+
+    private var backgroundTaskSection: some View {
+        @Bindable var appState = appState
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("后台任务")
+                .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
+
+            Toggle(isOn: $appState.cancelBackgroundStreamsOnProjectSwitch) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("切换项目时取消其他项目后台的 Claude 流")
+                        .font(.system(size: ClaudeTheme.size(12)))
+                    Text("开启后,切到项目 B 会终止项目 A 后台仍在运行的 Claude 命令行进程,释放内存。关闭则保留现状(多任务并行)。")
+                        .font(.system(size: ClaudeTheme.size(11)))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
         }
     }
 
