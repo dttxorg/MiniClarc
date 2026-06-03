@@ -15,6 +15,30 @@ extension FocusedValues {
     }
 }
 
+// MARK: - AppDelegate
+
+/// Synchronous cleanup hook for app termination. AppKit calls
+/// `applicationWillTerminate(_:)` near the end of the shutdown sequence;
+/// the runloop is already winding down, so we use synchronous
+/// `Task.cancel()` and direct state mutation rather than awaiting
+/// anything. Child CLI processes spawned via `Process` are reaped
+/// automatically when the app dies.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var appState: AppState?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        guard let appState else { return }
+        // Snapshot the keys first, then mutate. Mutating sessionStates
+        // while iterating it would crash.
+        let ids = appState.sessionStates.compactMap { $0.value.isStreaming ? $0.key : nil }
+        for sid in ids {
+            appState.sessionStates[sid]?.streamTask?.cancel()
+            appState.sessionStates[sid]?.isStreaming = false
+            appState.sessionStates[sid]?.activeStreamId = nil
+        }
+    }
+}
+
 // MARK: - ProjectWindowValue
 
 struct ProjectWindowValue: Codable, Hashable {
@@ -27,11 +51,12 @@ struct ProjectWindowValue: Codable, Hashable {
 @main
 struct ClarcApp: App {
     @State private var appState = AppState()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @FocusedValue(\.startNewChat) private var startNewChat
 
     var body: some Scene {
         WindowGroup {
-            MainWindowRoot(appState: appState)
+            MainWindowRoot(appState: appState, appDelegate: appDelegate)
                 .focusable(false)
         }
         .defaultSize(width: 1000, height: 700)
@@ -78,6 +103,7 @@ struct ClarcApp: App {
 
 struct MainWindowRoot: View {
     let appState: AppState
+    let appDelegate: AppDelegate
     @State private var windowState = WindowState()
     @State private var chatBridge = ChatBridge()
 
@@ -103,6 +129,7 @@ struct MainWindowRoot: View {
                     appState.handleNotificationTap(projectId: projectId, sessionId: sessionId, mainWindow: windowState)
                 }
             }
+            .onAppear { appDelegate.appState = appState }
     }
 }
 
