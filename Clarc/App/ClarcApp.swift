@@ -130,6 +130,22 @@ struct MainWindowRoot: View {
                 }
             }
             .onAppear { appDelegate.appState = appState }
+            .onDisappear {
+                // Main window is closing. If another project window is
+                // open for the currently selected project, that window
+                // owns the streaming sessions and we should leave them
+                // alone; we only cancel this project's streams. If no
+                // other window is open, cancel all background streams
+                // — the user is effectively quitting the project.
+                Task { @MainActor in
+                    guard let pid = windowState.selectedProject?.id else { return }
+                    if appState.hasOpenProjectWindow(for: pid) {
+                        await appState.cancelBackgroundStreamsForProject(pid)
+                    } else {
+                        await appState.cancelAllBackgroundStreams()
+                    }
+                }
+            }
     }
 }
 
