@@ -24,7 +24,7 @@ struct MessageListView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 16) {
+            VStack(spacing: 16) {
                 // Codex-style per-turn roll-up cards interleaved with the
                 // chat bubbles. When at least one phase summary exists
                 // (i.e. at least one assistant turn has completed), we
@@ -103,7 +103,7 @@ struct MessageListView: View {
             .padding(.top, 16)
 
             // Streaming view is in its own sibling container — text deltas don't affect settled layout
-            LazyVStack(spacing: 16) {
+            VStack(spacing: 16) {
                 // Tier 1: always render streaming content. The previous
                 // `if !windowState.focusMode` guard made the screen freeze
                 // when focus mode was on, because the user saw no streaming
