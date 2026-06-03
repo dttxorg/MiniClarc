@@ -65,7 +65,15 @@ struct MainView: View {
                         }
                     }
                 }
-                .id(appState.themeRevision)
+                // NOTE: do NOT attach `.id(themeRevision)` here. Doing so
+                // forces SwiftUI to tear down and rebuild the entire
+                // NavigationSplitView subtree on every theme change,
+                // discarding all transient state (sidebar selection,
+                // column visibility, scroll position, inspector state,
+                // in-progress text input, terminal process). Theme is
+                // already propagated via `ClaudeTheme` and SwiftUI's
+                // environment, so the existing child views redraw
+                // automatically without an id change.
                 .onChange(of: windowState.showInspector) { _, isShowing in
                     if isShowing, !inspectorStarted { inspectorStarted = true }
                 }

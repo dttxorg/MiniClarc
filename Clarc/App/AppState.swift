@@ -2165,6 +2165,20 @@ final class AppState {
         stopFlushTimer(for: key)
     }
 
+    /// Cancel a streaming session by sessionId even if it's not the current
+    /// window's active session. Used by deletion paths to stop background
+    /// streams before the on-disk session files are removed.
+    private func cancelBackgroundStream(for sessionId: String) async {
+        let streamId = sessionStates[sessionId]?.activeStreamId
+        sessionStates[sessionId]?.streamTask?.cancel()
+        sessionStates[sessionId]?.streamTask = nil
+        sessionStates[sessionId]?.isStreaming = false
+        sessionStates[sessionId]?.activeStreamId = nil
+        if let streamId {
+            await claude.cancel(streamId: streamId)
+        }
+    }
+
     func cancelStreaming(in window: WindowState) async {
         let key = window.currentSessionId ?? window.newSessionKey
         let streamToCancel = sessionStates[key]?.activeStreamId
@@ -2793,6 +2807,13 @@ final class AppState {
         if window.currentSessionId == session.id {
             detachCurrentStream(in: window)
             startNewChat(in: window)
+        } else {
+            // The session may still be streaming in the background
+            // (processStream detached when the user switched windows).
+            // We must cancel the in-flight task AND tell the CLI subprocess
+            // to terminate; otherwise it keeps writing to the just-deleted
+            // sessionId's on-disk jsonl and orphaning files.
+            await cancelBackgroundStream(for: session.id)
         }
         let origin = allSessionSummaries.first(where: { $0.id == session.id })?.origin ?? session.origin
         let cwd = projects.first(where: { $0.id == session.projectId })?.path
@@ -2821,6 +2842,13 @@ final class AppState {
         if let currentId = window.currentSessionId, ids.contains(currentId) {
             detachCurrentStream(in: window)
             startNewChat(in: window)
+        }
+
+        // Cancel every other (background) streaming session in the deletion
+        // set. This is critical: those CLIs are still running and would
+        // otherwise keep writing to a now-deleted sessionId.
+        for sid in ids where sid != window.currentSessionId {
+            await cancelBackgroundStream(for: sid)
         }
 
         for summary in toDelete {

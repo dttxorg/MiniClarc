@@ -325,15 +325,19 @@ private struct DiffTextRenderer: NSViewRepresentable {
         }
 
         private func fingerprint(of lines: [DiffLine]) -> Int {
+            // Hash every line, not just first/last. The previous
+            // `count + first + last` scheme would not detect edits in
+            // the middle of the diff (e.g. an Edit tool that changes
+            // only the middle hunk), so `update()` would skip the
+            // `setAttributedString` rebuild and the user would see
+            // stale text until they scrolled or interacted. The cost
+            // difference is negligible (a few extra hasher.combine
+            // calls per line) and the correctness win is real.
             var hasher = Hasher()
             hasher.combine(lines.count)
-            if let first = lines.first {
-                hasher.combine(first.text)
-                hasher.combine(first.kind)
-            }
-            if let last = lines.last, lines.count > 1 {
-                hasher.combine(last.text)
-                hasher.combine(last.kind)
+            for line in lines {
+                hasher.combine(line.text)
+                hasher.combine(line.kind)
             }
             return hasher.finalize()
         }

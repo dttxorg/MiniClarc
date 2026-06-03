@@ -22,7 +22,34 @@ final class NotificationService: NSObject {
     }
 
     func requestAuthorizationIfNeeded() async {
-        guard !didRequestAuthorization else { return }
+        // Re-check the system-level authorization status before deciding
+        // whether to skip the request. If the user originally denied and
+        // later went into System Settings to allow notifications, the
+        // previous request returned `.denied` and our local
+        // `didRequestAuthorization` flag would otherwise lock us out
+        // forever. We only short-circuit when the system has already
+        // granted (or is provisional) — those are stable states that don't
+        // change without a quit-and-relaunch.
+        let current = await UNUserNotificationCenter.current().notificationSettings()
+        if didRequestAuthorization {
+            switch current.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                return
+            case .denied, .notDetermined:
+                // The system status is "not allowed" but our local flag
+                // says we've already asked. Re-ask only if the system
+                // status is `.notDetermined` (first ask) — if it's
+                // `.denied`, the user must change it in System Settings;
+                // re-asking would just silently no-op.
+                if current.authorizationStatus == .notDetermined {
+                    didRequestAuthorization = false
+                } else {
+                    return
+                }
+            @unknown default:
+                return
+            }
+        }
         didRequestAuthorization = true
         do {
             let granted = try await UNUserNotificationCenter.current()

@@ -62,6 +62,16 @@ actor PermissionServer {
     }
     private var sessionRegistry: [String: SessionContext] = [:]
 
+    /// Paths of hook settings files we've written. Tracked so we can
+    /// delete them on `stop()`. Without this, every CLI session leaves
+    /// a `claudework-hooks-<uuid>.json` in `temporaryDirectory` and
+    /// `FileManager.default.temporaryDirectory` does not auto-purge on
+    /// macOS, so the file count grows without bound.
+    private var generatedHookFiles: [URL] = []
+    private static let tempCleanupMaxAge: TimeInterval = 60 * 60 * 24  // 24h
+    private static let tempCleanupSweepInterval: TimeInterval = 60 * 60  // 1h
+    private var tempSweepTask: Task<Void, Never>?
+
     /// Safe: CLI tool names are alphanumeric (`Bash`, `Edit`, `mcp__server__name`).
     private static func sessionToolKey(sid: String, tool: String) -> String {
         "\(sid)::\(tool)"
@@ -191,6 +201,14 @@ actor PermissionServer {
         sessionRegistry.removeAll()
         sessionToolAllows.removeAll()
         bashCmdAllows = nil
+
+        // Stop the periodic sweep and remove the hook files we wrote.
+        tempSweepTask?.cancel()
+        tempSweepTask = nil
+        for url in generatedHookFiles {
+            try? FileManager.default.removeItem(at: url)
+        }
+        generatedHookFiles.removeAll()
     }
 
     // MARK: - Public API
@@ -362,7 +380,46 @@ actor PermissionServer {
         let tempDir = FileManager.default.temporaryDirectory
         let filePath = tempDir.appendingPathComponent("claudework-hooks-\(UUID().uuidString).json")
         try json.write(to: filePath, atomically: true, encoding: .utf8)
+        // Track so stop() can clean up; the file is also reaped by the
+        // periodic sweep below in case we never get a clean stop.
+        generatedHookFiles.append(filePath)
+        ensureTempSweepScheduled()
         return filePath.path
+    }
+
+    /// Start a background task that periodically removes old
+    /// `claudework-hooks-*.json` files from `temporaryDirectory`. This is
+    /// the safety net for processes that crashed before `stop()` could
+    /// run, and for files written by old versions of the app.
+    private func ensureTempSweepScheduled() {
+        guard tempSweepTask == nil else { return }
+        let interval = Self.tempCleanupSweepInterval
+        let maxAge = Self.tempCleanupMaxAge
+        let tempDir = FileManager.default.temporaryDirectory
+        tempSweepTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                await self?.sweepOldHookFiles(in: tempDir, maxAge: maxAge)
+            }
+        }
+    }
+
+    private func sweepOldHookFiles(in dir: URL, maxAge: TimeInterval) {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let now = Date()
+        for url in contents where url.lastPathComponent.hasPrefix("claudework-hooks-") {
+            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate) ?? .distantPast
+            if now.timeIntervalSince(mtime) > maxAge {
+                try? fm.removeItem(at: url)
+            }
+        }
     }
 
     // MARK: - Connection Handling
@@ -542,12 +599,22 @@ actor PermissionServer {
     private func readHTTPRequest(_ connection: NWConnection) async throws -> Data {
         var buffer = Data()
         let headerEnd = Data("\r\n\r\n".utf8)
+        // 64 KB is a generous upper bound for HTTP headers in a local-only
+        // hook protocol; without this, a misbehaving client (or a
+        // compromised child process) can send bytes forever without ever
+        // emitting the header terminator, growing `buffer` without bound
+        // and OOMing the GUI.
+        let maxHeaderBytes = 64 * 1024
+        let maxBodyBytes = 16 * 1024 * 1024  // 16 MB — enough for any realistic hook payload
 
         // Phase 1: Read until we find the end of headers.
         while !buffer.contains(headerEnd) {
             let chunk = try await readChunk(connection, maxLength: 8192)
             guard !chunk.isEmpty else { throw PermissionServerError.connectionClosed }
             buffer.append(chunk)
+            if buffer.count > maxHeaderBytes {
+                throw PermissionServerError.malformedRequest
+            }
         }
 
         // Phase 2: If there's a Content-Length, read the body too.
@@ -559,6 +626,11 @@ actor PermissionServer {
         let contentLength = parseContentLength(from: headerString)
 
         if contentLength > 0 {
+            // Cap body length so a malicious Content-Length cannot drive
+            // unbounded reads.
+            if contentLength > maxBodyBytes {
+                throw PermissionServerError.malformedRequest
+            }
             let bodyStart = headerRange.upperBound
             let bodyBytesRead = buffer.count - buffer.distance(from: buffer.startIndex, to: bodyStart)
             var remaining = contentLength - bodyBytesRead

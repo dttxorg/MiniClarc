@@ -226,26 +226,61 @@ actor MarketplaceService {
 
     // MARK: - CLI Runner
 
-    private func runCLI(_ arguments: [String]) async -> (output: String, exitCode: Int32) {
-        await withCheckedContinuation { continuation in
+    private func runCLI(_ arguments: [String], timeout: TimeInterval = 30) async -> (output: String, exitCode: Int32) {
+        // We can't cancel a Process from inside a `withCheckedContinuation`
+        // without leaking the continuation. Use an actor-isolated wrapper:
+        // wrap the process in a class so we can reach it from the timeout
+        // task to force-terminate.
+        final class ProcessBox: @unchecked Sendable {
             let process = Process()
-            let pipe = Pipe()
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+        }
+
+        let box = ProcessBox()
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<(output: String, exitCode: Int32), Never>) in
+            let stdoutPipe = box.stdoutPipe
+            let stderrPipe = box.stderrPipe
+            let process = box.process
 
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["claude"] + arguments
-            process.standardOutput = pipe
-            process.standardError = pipe
-            process.environment = ProcessInfo.processInfo.environment
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+            // Inherit a safe subset of env; do not pass the parent env wholesale.
+            process.environment = [
+                "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+                "HOME": ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(),
+                "LANG": ProcessInfo.processInfo.environment["LANG"] ?? "en_US.UTF-8",
+            ]
+
+            // IMPORTANT: keep a strong reference to `box` inside the closure
+            // so the process isn't deallocated mid-run.
+            let timeoutBox = box
+            let timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                if process.isRunning {
+                    // Force-kill so the continuation definitely resumes.
+                    kill(process.processIdentifier, SIGKILL)
+                }
+                _ = timeoutBox  // retain
+            }
 
             process.terminationHandler = { _ in
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                continuation.resume(returning: (output, process.terminationStatus))
+                timeoutTask.cancel()
+                let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let out = String(data: outData, encoding: .utf8) ?? ""
+                let err = String(data: errData, encoding: .utf8) ?? ""
+                let merged = err.isEmpty ? out : "\(out)\n\(err)"
+                continuation.resume(returning: (merged, process.terminationStatus))
             }
 
             do {
                 try process.run()
             } catch {
+                timeoutTask.cancel()
                 continuation.resume(returning: (error.localizedDescription, 1))
             }
         }

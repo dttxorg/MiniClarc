@@ -297,13 +297,20 @@ private struct RichEditorView: NSViewRepresentable {
         if let storage = tv.textStorage { applyHeadingStyles(to: storage) }
 
         memoContext.textView = tv
+        context.coordinator.memoContext = memoContext
         context.coordinator.setupKeyMonitor(textView: tv, memoContext: memoContext)
         return scrollView
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
         coordinator.removeKeyMonitor()
-        coordinator.cancelPendingSave()
+        // Flush any pending debounced save BEFORE cancelling. Otherwise
+        // edits made within the last 1s of viewing a memo would be lost
+        // when the user switches projects or closes the inspector — the
+        // .id(projectId) on the parent re-creates this view, which calls
+        // dismantleNSView, and any unsaved text in the debounce window
+        // vanishes.
+        coordinator.flushPendingSaveImmediately()
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
@@ -336,6 +343,11 @@ private struct RichEditorView: NSViewRepresentable {
         var lastFocusTrigger: UUID? = nil
         var saveTask: Task<Void, Never>?
         var eventMonitor: Any?
+        // Weak reference to the host view's memoContext so we can read the
+        // live NSTextView at dismantle time. Without this, flushPending-
+        // SaveImmediately would not be able to read the current attributed
+        // string on view teardown.
+        weak var memoContext: MemoContext?
 
         init(projectId: UUID?) { self.projectId = projectId }
 
@@ -347,6 +359,26 @@ private struct RichEditorView: NSViewRepresentable {
         func cancelPendingSave() {
             saveTask?.cancel()
             saveTask = nil
+        }
+
+        /// Cancel the pending debounced save AND write the current
+        /// attributed-string synchronously to UserDefaults. Called from
+        /// `dismantleNSView` so that edits made in the last 1s of viewing
+        /// a memo (the debounce window) are not lost when the user
+        /// switches projects. NSKeyedArchiver + UserDefaults.set are
+        /// small and synchronous on the main thread; this is acceptable
+        /// for a memo panel.
+        func flushPendingSaveImmediately() {
+            saveTask?.cancel()
+            saveTask = nil
+            guard let tv = memoContext?.textView,
+                  let storage = tv.textStorage else { return }
+            let attr = NSAttributedString(attributedString: storage)
+            guard let data = try? NSKeyedArchiver.archivedData(
+                withRootObject: attr,
+                requiringSecureCoding: false
+            ) else { return }
+            UserDefaults.standard.set(data, forKey: storageKey)
         }
 
         func loadAttributedText() -> NSAttributedString {

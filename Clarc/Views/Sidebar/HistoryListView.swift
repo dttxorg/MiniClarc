@@ -21,6 +21,17 @@ struct HistoryListView: View {
                 sessionList
             }
         }
+        // Tick the relative-time formatter reference every 30 seconds so
+        // "3m ago" advances to "4m ago" on its own. 30s is a reasonable
+        // compromise: a 60s tick would make "1m ago" linger visibly past
+        // the actual 1-minute mark; a 10s tick wastes cycles. The tick
+        // also re-evaluates formattedDate, so the row's text updates.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                now = Date()
+            }
+        }
         .alert("Delete All", isPresented: $showDeleteAllAlert) {
             Button("Delete", role: .destructive) {
                 let projectId: UUID?
@@ -290,8 +301,17 @@ struct HistoryListView: View {
         return f
     }()
 
+    /// `RelativeDateTimeFormatter` only changes its output when the
+    /// reference time crosses a unit boundary (one minute, one hour,
+    /// one day). Without an active tick the row's "3m ago" stays
+    /// stale until the user does something that triggers a redraw.
+    /// We expose this state to `formattedDate(_:)` so the formatter is
+    /// called with the latest `now`, and pair it with a `TimelineView`
+    /// in the row that re-evaluates the formatted string every 30s.
+    @State private var now = Date()
+
     private func formattedDate(_ date: Date) -> String {
-        Self.relativeDateFormatter.localizedString(for: date, relativeTo: Date())
+        Self.relativeDateFormatter.localizedString(for: date, relativeTo: now)
     }
 }
 

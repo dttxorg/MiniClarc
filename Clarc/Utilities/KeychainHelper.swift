@@ -24,15 +24,30 @@ enum KeychainHelper {
 
     // MARK: - Write / Delete (SecItem API — own app items)
 
-    nonisolated static func save(_ data: Data, service: String, account: String) throws {
-        let query: [String: Any] = [
+    nonisolated static func save(_ data: Data, service: String, account: String? = nil) throws {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
         ]
+        if let account {
+            query[kSecAttrAccount as String] = account
+        }
 
         let updateAttributes: [String: Any] = [kSecValueData as String: data]
-        var status = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
+
+        // Build a query that targets the existing entry. When `account` is
+        // nil, the update lookup will use service-only matching, which is
+        // fine for "the single item under this service" (the typical case
+        // for external tools like `claude` that store a single blob).
+        var lookupQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ]
+        if let account {
+            lookupQuery[kSecAttrAccount as String] = account
+        }
+
+        var status = SecItemUpdate(lookupQuery as CFDictionary, updateAttributes as CFDictionary)
 
         if status == errSecItemNotFound {
             var addQuery = query

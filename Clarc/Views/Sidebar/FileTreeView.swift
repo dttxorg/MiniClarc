@@ -429,7 +429,8 @@ struct FileNode: Identifiable, Sendable {
             return nil
         }
 
-        return buildNode(url: url, fm: fm, currentDepth: 0, maxDepth: maxDepth, showHiddenFiles: showHiddenFiles)
+        var visited: Set<String> = []
+        return buildNode(url: url, fm: fm, currentDepth: 0, maxDepth: maxDepth, showHiddenFiles: showHiddenFiles, visited: &visited)
     }
 
     private nonisolated static let ignoredNames: Set<String> = [
@@ -443,12 +444,36 @@ struct FileNode: Identifiable, Sendable {
         fm: FileManager,
         currentDepth: Int,
         maxDepth: Int,
-        showHiddenFiles: Bool
+        showHiddenFiles: Bool,
+        visited: inout Set<String>  // canonical paths already visited
     ) -> FileNode {
         let name = url.lastPathComponent
 
+        // Resolve the canonical (symlink-followed) path so that a symlink
+        // loop such as `a/link -> a/link/sub` terminates instead of
+        // recursing until the stack overflows. Without this, a single
+        // hostile or accidental symlink can crash the sidebar scan.
+        let canonical = (try? fm.destinationOfSymbolicLink(atPath: url.path)) ?? url.path
+        let canonicalPath: String
+        if canonical != url.path {
+            // It's a symlink. Resolve to its real destination for the
+            // visited-set check, and from here on treat the file as if
+            // we encountered the destination directly.
+            let resolved = URL(fileURLWithPath: canonical).resolvingSymlinksInPath().path
+            canonicalPath = resolved
+        } else {
+            canonicalPath = url.resolvingSymlinksInPath().path
+        }
+
+        if visited.contains(canonicalPath) {
+            // We have already entered this directory elsewhere in the
+            // walk. Show it as an empty folder so the user can still see
+            // its name without recursing again.
+            return FileNode(id: url.path, name: name, isDirectory: true, children: [])
+        }
+
         var isDir: ObjCBool = false
-        fm.fileExists(atPath: url.path, isDirectory: &isDir)
+        fm.fileExists(atPath: canonicalPath, isDirectory: &isDir)
 
         guard isDir.boolValue else {
             return FileNode(id: url.path, name: name, isDirectory: false, children: [])
@@ -461,20 +486,22 @@ struct FileNode: Identifiable, Sendable {
             if !showHiddenFiles { options.insert(.skipsHiddenFiles) }
 
             let contents = (try? fm.contentsOfDirectory(
-                at: url,
+                at: URL(fileURLWithPath: canonicalPath),
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: options
             )) ?? []
 
+            visited.insert(canonicalPath)
             children = contents
                 .filter { !ignoredNames.contains($0.lastPathComponent) }
-                .map { buildNode(url: $0, fm: fm, currentDepth: currentDepth + 1, maxDepth: maxDepth, showHiddenFiles: showHiddenFiles) }
+                .map { buildNode(url: $0, fm: fm, currentDepth: currentDepth + 1, maxDepth: maxDepth, showHiddenFiles: showHiddenFiles, visited: &visited) }
                 .sorted { lhs, rhs in
                     if lhs.isDirectory != rhs.isDirectory {
                         return lhs.isDirectory
                     }
                     return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
                 }
+            visited.remove(canonicalPath)
         }
 
         return FileNode(id: url.path, name: name, isDirectory: true, children: children)

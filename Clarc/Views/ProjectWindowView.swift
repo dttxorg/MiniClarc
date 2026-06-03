@@ -27,7 +27,11 @@ struct ProjectWindowView: View {
                         .keyboardShortcut("3", modifiers: .command)
                         .hidden()
                     }
-                    .id(appState.themeRevision)
+                    // Theme is propagated via the ClaudeTheme environment;
+                    // attaching `.id(themeRevision)` here would force a full
+                    // subtree rebuild on every theme change, destroying the
+                    // window's chat scroll position, input text, terminal
+                    // process, and inspector state.
                     .navigationTitle(windowState.selectedProject?.name ?? "Project")
                     .onChange(of: windowState.showInspector) { _, isShowing in
                         if isShowing, !inspectorStarted { inspectorStarted = true }

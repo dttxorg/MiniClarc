@@ -253,13 +253,30 @@ actor GitHubService {
             throw GitHubError.noAccessToken
         }
 
-        // HTTPS clone with token — no SSH setup required
-        let cloneURL = "https://x-access-token:\(token)@github.com/\(repo.fullName).git"
+        // SECURITY: do NOT embed the token in the URL. The URL ends up in
+        // `Process.arguments` (visible via `ps auxe`/Activity Monitor) and
+        // git itself will write the resolved remote URL to its config and
+        // credential helper, where it persists. Instead, pass the token via
+        // a temporary http.extraHeader that is scoped to this one invocation
+        // and never written to disk.
+        let cleanURL = "https://github.com/\(repo.fullName).git"
+        let credentialHeader = "http.extraHeader=Authorization: Basic \(Self.basicAuthHeader(token: token))"
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["clone", cloneURL, path]
-        process.environment = ProcessInfo.processInfo.environment
+        process.arguments = [
+            "-c", credentialHeader,
+            "-c", "credential.helper=",
+            "clone", cleanURL, path,
+        ]
+        // Inherit only the safe subset of the parent env. Do NOT pass the
+        // process environment wholesale, otherwise any future code that adds
+        // secrets to the parent env will leak them.
+        process.environment = [
+            "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(),
+            "LANG": ProcessInfo.processInfo.environment["LANG"] ?? "en_US.UTF-8",
+        ]
 
         let stderrPipe = Pipe()
         process.standardError = stderrPipe
@@ -279,7 +296,41 @@ actor GitHubService {
             throw GitHubError.cloneFailed(stderr)
         }
 
+        // git may have written the resolved remote URL (without the token, since
+        // we used -c) to .git/config. Strip any accidentally-persisted auth
+        // material defensively, even though -c http.extraHeader shouldn't be
+        // persisted by git.
+        Self.sanitizeGitConfig(at: path, repoFullName: repo.fullName)
+
         logger.info("Cloned \(repo.fullName, privacy: .public) to \(path, privacy: .public)")
+    }
+
+    /// Build the `Basic <base64(user:token)>` header value. GitHub accepts this
+    /// for password-based auth and for fine-grained tokens; for fine-grained
+    /// tokens the username can be anything (we use the literal "x-access-token"
+    /// token value here for compatibility with both PAT and OAuth tokens).
+    private nonisolated static func basicAuthHeader(token: String) -> String {
+        let raw = "x-access-token:\(token)"
+        guard let data = raw.data(using: .utf8) else { return "" }
+        return data.base64EncodedString()
+    }
+
+    /// Defensive cleanup: ensure no auth material leaked into the cloned repo's
+    /// config (e.g. via `git clone --config` or `credential.helper` later).
+    private nonisolated static func sanitizeGitConfig(at path: String, repoFullName: String) {
+        let configPath = (path as NSString).appendingPathComponent(".git/config")
+        guard let contents = try? String(contentsOfFile: configPath, encoding: .utf8) else { return }
+        // Strip any "username:password@" pattern in remote URLs. This is a
+        // belt-and-suspenders measure: with -c http.extraHeader, git should
+        // not persist the auth, but we don't want to depend on that.
+        let sanitized = contents.replacingOccurrences(
+            of: #"https?://[^/\s]+:[^/\s]+@github\.com"#,
+            with: "https://github.com",
+            options: .regularExpression
+        )
+        if sanitized != contents {
+            try? sanitized.write(toFile: configPath, atomically: true, encoding: .utf8)
+        }
     }
 
     // MARK: - Private Helpers

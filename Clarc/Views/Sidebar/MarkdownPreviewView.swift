@@ -110,8 +110,33 @@ struct MarkdownPreviewView: NSViewRepresentable {
 
     private static let jsParser: String = #"""
     (function() {
+        // Escape every character that has meaning in HTML attribute or text contexts.
+        // This MUST run before any value is interpolated into an attribute or tag.
         function escHTML(s) {
-            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return s.replace(/[&<>"'\/]/g, function (c) {
+                switch (c) {
+                    case '&': return '&amp;';
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '"': return '&quot;';
+                    case "'": return '&#39;';
+                    case '/': return '&#x2F;';
+                }
+                return c;
+            });
+        }
+
+        // Allow only safe URL schemes. Anything else is replaced with about:blank.
+        // Refuses javascript:, data:, vbscript:, file:, and similar vectors.
+        function safeURL(raw) {
+            const trimmed = String(raw).trim();
+            const lower = trimmed.toLowerCase();
+            if (lower.startsWith('http://') || lower.startsWith('https://') ||
+                lower.startsWith('mailto:') || lower.startsWith('#') ||
+                lower.startsWith('/')) {
+                return trimmed;
+            }
+            return 'about:blank';
         }
 
         function parseBlocks(md) {
@@ -211,8 +236,15 @@ struct MarkdownPreviewView: NSViewRepresentable {
                 return '\u0000I' + (codes.length - 1) + '\u0000';
             });
             s = escHTML(s);
-            s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, '<img src="$2" alt="$1">');
-            s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, '<a href="$2">$1</a>');
+            // Image: alt text and src both flow into attribute values, so both
+            // need escHTML and the src must be checked against the URL allowlist.
+            s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, function (_, alt, src) {
+                return '<img src="' + safeURL(src) + '" alt="' + escHTML(alt) + '">';
+            });
+            // Link: text and href both flow into attribute / text contexts.
+            s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, function (_, text, href) {
+                return '<a href="' + safeURL(href) + '" rel="noopener noreferrer">' + escHTML(text) + '</a>';
+            });
             s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
             s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
             s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');

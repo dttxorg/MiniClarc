@@ -49,6 +49,20 @@ actor SSHKeyManager {
             throw SSHKeyError.generationFailed(stderr)
         }
 
+        // Defensive: ssh-keygen normally creates the private key with 0600,
+        // but if the file already existed (e.g. from a previous install or
+        // copied by hand), ssh-keygen will overwrite the contents without
+        // tightening permissions. Force 0600 on the private key and 0644 on
+        // the public key.
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: keyPath
+        )
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: "\(keyPath).pub"
+        )
+
         logger.info("Generated SSH key at \(self.keyPath, privacy: .public)")
     }
 
@@ -117,10 +131,18 @@ actor SSHKeyManager {
     }
 
     /// Run `ssh-keyscan github.com` and append the result to `~/.ssh/known_hosts`.
+    ///
+    /// Security: a naive `ssh-keyscan | tee known_hosts` is a TOFU bypass —
+    /// any attacker on the network path can serve a fake key and Clarc will
+    /// trust it permanently. To mitigate, we hardcode GitHub's published SSH
+    /// key fingerprints (from https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
+    /// and only accept the `ssh-keyscan` output if it matches.
     func addToKnownHosts() async throws {
         let knownHostsPath = "\(sshDirectory)/known_hosts"
 
-        // Check if github.com is already in known_hosts.
+        // Check if github.com is already in known_hosts. If so, leave the
+        // existing entry alone — even if it was added by a compromised
+        // tool, the user is presumably already using it.
         if FileManager.default.fileExists(atPath: knownHostsPath) {
             let existing = try String(contentsOfFile: knownHostsPath, encoding: .utf8)
             if existing.contains("github.com") {
@@ -131,7 +153,7 @@ actor SSHKeyManager {
 
         let result = try await run(
             "/usr/bin/ssh-keyscan",
-            arguments: ["-t", "ed25519,rsa", "github.com"]
+            arguments: ["-T", "10", "-t", "ed25519,rsa,ecdsa", "github.com"]
         )
 
         guard result.exitCode == 0, !result.stdout.isEmpty else {
@@ -140,12 +162,20 @@ actor SSHKeyManager {
             throw SSHKeyError.keyscanFailed(stderr)
         }
 
+        // Verify the keyscan output against GitHub's published fingerprints
+        // before writing anything. This blocks the most common MITM scenario
+        // where an attacker on the network path serves their own key.
+        let acceptedKeys = try Self.filterTrustedGitHubKeys(keyscanOutput: result.stdout)
+        guard !acceptedKeys.isEmpty else {
+            logger.error("ssh-keyscan output did not match any pinned GitHub key. Refusing to update known_hosts.")
+            throw SSHKeyError.keyscanFailed("No trusted GitHub keys returned by ssh-keyscan")
+        }
+
         try ensureSSHDirectory()
 
-        let data = Data(result.stdout.utf8)
-        let handle: FileHandle
+        let data = Data(acceptedKeys.joined(separator: "\n").appending("\n").utf8)
         if FileManager.default.fileExists(atPath: knownHostsPath) {
-            handle = try FileHandle(forWritingTo: URL(fileURLWithPath: knownHostsPath))
+            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: knownHostsPath))
             handle.seekToEndOfFile()
             handle.write(data)
             handle.closeFile()
@@ -157,7 +187,40 @@ actor SSHKeyManager {
             )
         }
 
-        logger.info("Added github.com to known_hosts.")
+        logger.info("Added github.com to known_hosts (verified against pinned fingerprints).")
+    }
+
+    /// GitHub-published SSH public keys as of 2024-2025.
+    /// Source: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+    /// These are the raw base64 key bodies GitHub serves via `ssh-keyscan github.com`.
+    /// The list is intentionally narrow: every entry must come from GitHub's
+    /// official documentation. If GitHub rotates a key, this list must be
+    /// updated — until then, ssh-keyscan output that doesn't match is rejected.
+    private nonisolated static let pinnedGitHubPublicKeys: Set<String> = [
+        // ssh-ed25519 (current primary)
+        "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+        // ecdsa-sha2-nistp256
+        "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=",
+    ]
+
+    /// Parse the output of `ssh-keyscan` and return only the lines whose
+    /// base64 key material matches one of GitHub's pinned public keys.
+    /// `ssh-keyscan` output format: `<host> <keytype> <base64-key> [comment]`
+    private nonisolated static func filterTrustedGitHubKeys(keyscanOutput: String) throws -> [String] {
+        var accepted: [String] = []
+        for rawLine in keyscanOutput.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            // Lines starting with '#' are ssh-keyscan warnings/errors — skip.
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            // Format: host keytype base64key [comment]
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard fields.count >= 3 else { continue }
+            let keyMaterial = String(fields[2])
+            if pinnedGitHubPublicKeys.contains(keyMaterial) {
+                accepted.append(line)
+            }
+        }
+        return accepted
     }
 
     // MARK: - Errors

@@ -23,7 +23,6 @@ actor ClaudeService {
     /// Writable stdin handles per stream — used for sending follow-up messages (e.g., AskUserQuestion responses).
     /// Entry is removed when stdin is closed (after `result` event or on cancel).
     private var stdinHandles: [UUID: FileHandle] = [:]
-    private var inactivityTimer: Task<Void, Never>?
 
     /// Per-stream stderr accumulator — used to deliver error messages when process exits without a response
     private var stderrBuffers: [UUID: String] = [:]
@@ -393,7 +392,20 @@ actor ClaudeService {
                             if capturedSessionId == nil,
                                let sid = (json["session_id"] as? String) ?? (json["sessionId"] as? String) {
                                 capturedSessionId = sid
-                                Task { await self.recordSessionId(streamId: streamId, sessionId: sid) }
+                                // AWAIT synchronously: this is inside a
+                                // detached stream-read Task running on the
+                                // actor's cooperative pool. Awaiting here
+                                // (a) hops to the actor, (b) records the
+                                // sessionId, (c) hops back, in that order.
+                                // The terminationHandler's Task also hops
+                                // to the actor; per Swift's actor FIFO
+                                // ordering for Tasks spawned on the same
+                                // actor, our record-sessionId hop will
+                                // complete before the termination handler
+                                // runs, so consumeSessionId in the handler
+                                // will see the value. A fire-and-forget
+                                // `Task { ... }` would race.
+                                await self.recordSessionId(streamId: streamId, sessionId: sid)
                             }
                         } else if rawLineCount <= 30 {
                             log.info("[Stream:RAW] #\(rawLineCount) non-JSON line=\(line.prefix(600))")
@@ -596,13 +608,34 @@ actor ClaudeService {
                     ]
                 ]
             ]
-            try Self.writeJSONLine(userMessage, to: stdinHandle)
+            do {
+                try Self.writeJSONLine(userMessage, to: stdinHandle)
+            } catch {
+                // The process has already started. If we can't deliver the
+                // initial prompt, the CLI will block on stdin forever and
+                // become an orphan — there's no way to feed it the prompt
+                // later, and the user sees a hung UI. Kill the process and
+                // clean up our bookkeeping before re-throwing.
+                logger.error("Failed to write initial prompt: \(error.localizedDescription, privacy: .public). Killing stream=\(streamId)")
+                if proc.isRunning {
+                    proc.terminate()
+                }
+                self.processes.removeValue(forKey: streamId)
+                self.stdinHandles.removeValue(forKey: streamId)
+                throw ClaudeError.spawnFailed(error.localizedDescription)
+            }
 
             logger.info(
                 "Spawned claude process pid=\(proc.processIdentifier) cwd=\(cwd, privacy: .public) stream=\(streamId)"
             )
         } catch {
             logger.error("Failed to spawn claude: \(error, privacy: .public)")
+            // Ensure no orphan survives even if run() itself failed.
+            if proc.isRunning {
+                proc.terminate()
+            }
+            self.processes.removeValue(forKey: streamId)
+            self.stdinHandles.removeValue(forKey: streamId)
             throw ClaudeError.spawnFailed(error.localizedDescription)
         }
     }
@@ -636,6 +669,13 @@ actor ClaudeService {
         if let handle = stdinHandles.removeValue(forKey: streamId) {
             try? handle.close()
         }
+        // Drop per-stream state that otherwise accumulates forever on
+        // abnormal exits (the consume* helpers that read these only run
+        // on the happy path of receiving a `result` event).
+        stderrBuffers.removeValue(forKey: streamId)
+        // sessionId is consumed by `consumeSessionId` during the
+        // termination handler, so don't remove it here — the handler
+        // hasn't run its body yet when this method is called.
     }
 
     private func recordSessionId(streamId: UUID, sessionId: String) {
@@ -719,9 +759,6 @@ actor ClaudeService {
 
     /// Tear down any resources held by the service.
     func cleanup() {
-        inactivityTimer?.cancel()
-        inactivityTimer = nil
-
         for (_, process) in processes where process.isRunning {
             process.interrupt()
         }

@@ -51,9 +51,7 @@ public actor SessionMetaStore {
             cache[sessionId] = empty
             return empty
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let meta = (try? decoder.decode(Meta.self, from: data)) ?? Meta()
+        let meta = Self.decodeTolerant(data) ?? Meta()
         cache[sessionId] = meta
         return meta
     }
@@ -87,21 +85,95 @@ public actor SessionMetaStore {
         guard let files = try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil, options: .skipsHiddenFiles) else {
             return [:]
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
         var result: [String: Meta] = [:]
         for file in files where file.pathExtension == "json" {
             let sid = file.deletingPathExtension().lastPathComponent
-            if let data = try? Data(contentsOf: file),
-               let meta = try? decoder.decode(Meta.self, from: data) {
-                result[sid] = meta
-            }
+            guard let data = try? Data(contentsOf: file) else { continue }
+            // Per-file tolerance: a single field with a wrong type or an
+            // unknown `permissionMode` raw value must not blank out the
+            // entire session's metadata (title, isPinned, model, ...).
+            // If the JSON is structurally broken we still fall back to
+            // an empty Meta, but if it's well-formed we keep whatever
+            // we can decode.
+            guard let meta = Self.decodeTolerant(data) else { continue }
+            result[sid] = meta
         }
         cache.merge(result) { _, new in new }
         return result
     }
 
+    /// Decode a `Meta` from JSON, tolerating per-field failures.
+    ///
+    /// Forward-compat strategy: as the schema evolves (new fields,
+    /// `PermissionMode` gaining cases, date format changes, etc.), a
+    /// single bad field would otherwise cascade into an empty Meta
+    /// because `try? decoder.decode(Meta.self, ...)` discards the whole
+    /// value. Instead, we decode into a generic dictionary and pull out
+    /// each field with `decodeIfPresent`, so a corrupt or unknown value
+    /// in one place does not erase the others.
+    private static func decodeTolerant(_ data: Data) -> Meta? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let raw = try? decoder.decode([String: AnyCodableValue].self, from: data) else {
+            return nil
+        }
+        return Meta(
+            title: raw["title"]?.stringValue,
+            isPinned: raw["isPinned"]?.boolValue ?? false,
+            model: raw["model"]?.stringValue,
+            effort: raw["effort"]?.stringValue,
+            permissionMode: raw["permissionMode"].flatMap { $0.stringValue.flatMap(PermissionMode.init(rawValue:)) },
+            updatedAt: raw["updatedAt"]?.dateValue
+        )
+    }
+
     private func fileURL(for sessionId: String) -> URL {
         baseURL.appendingPathComponent("\(sessionId).json")
+    }
+}
+
+/// Minimal `Sendable` value type that can hold any JSON scalar or
+/// array/dict. Lets us decode the on-disk JSON into a permissive
+/// intermediate representation so `SessionMetaStore.decodeTolerant`
+/// can pull out individual fields without one bad field collapsing
+/// the whole decode.
+private enum AnyCodableValue: Decodable, Sendable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case null
+    case array([AnyCodableValue])
+    case object([String: AnyCodableValue])
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null; return }
+        if let v = try? c.decode(Bool.self) { self = .bool(v); return }
+        if let v = try? c.decode(Int.self) { self = .int(v); return }
+        if let v = try? c.decode(Double.self) { self = .double(v); return }
+        if let v = try? c.decode(String.self) { self = .string(v); return }
+        if let v = try? c.decode([AnyCodableValue].self) { self = .array(v); return }
+        if let v = try? c.decode([String: AnyCodableValue].self) { self = .object(v); return }
+        self = .null
+    }
+
+    var stringValue: String? {
+        if case .string(let s) = self { return s }
+        return nil
+    }
+
+    var boolValue: Bool? {
+        if case .bool(let b) = self { return b }
+        return nil
+    }
+
+    var dateValue: Date? {
+        if case .string(let s) = self {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return iso.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+        }
+        return nil
     }
 }

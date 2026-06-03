@@ -37,6 +37,13 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         let tv = LocalProcessTerminalView(frame: .zero)
 
+        // Bump generation: any in-flight pollAndSend closure that was
+        // scheduled against a *previous* EmbeddedTerminalView (e.g. one
+        // that has been deallocated because the user hit the Reset
+        // button) will see the mismatch in its delayed block and bail
+        // out before sending bytes to a deallocated tv.
+        context.coordinator.generation &+= 1
+
         // Set terminal background/foreground colors to match the theme
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         tv.nativeBackgroundColor = isDark
@@ -57,7 +64,7 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         process?.terminalView = tv
 
         if let cmd = initialCommand {
-            pollAndSend(tv: tv, command: cmd)
+            pollAndSend(tv: tv, command: cmd, coordinator: context.coordinator)
         }
 
         // Auto-focus after being added to the window
@@ -101,20 +108,35 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         return env.map { "\($0.key)=\($0.value)" }
     }
 
-    private func pollAndSend(tv: LocalProcessTerminalView, command: String, attempt: Int = 0) {
+    private func pollAndSend(tv: LocalProcessTerminalView, command: String, coordinator: Coordinator, attempt: Int = 0) {
         guard attempt < 30 else { return }
         let proc = process
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        let initialGeneration = coordinator.generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak coordinator] in
+            // The view that captured `tv` may have been torn down (Reset
+            // button, parent view identity change) before this closure
+            // fired. Drop the write instead of sending bytes to a
+            // deallocated LocalProcessTerminalView.
+            guard coordinator?.generation == initialGeneration else { return }
             guard proc?.terminated != true else { return }
+            // Belt-and-suspenders: also check the tv is still attached
+            // to a window. Sending to a detached tv is a no-op in
+            // practice but SwiftTerm has historically had edge cases
+            // around this on certain macOS releases.
+            guard tv.window != nil else { return }
             let terminal = tv.getTerminal()
             let firstLine = terminal.getLine(row: 0)?.translateToString(trimRight: true) ?? ""
             if !firstLine.isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak coordinator] in
+                    guard coordinator?.generation == initialGeneration else { return }
                     guard proc?.terminated != true else { return }
+                    guard tv.window != nil else { return }
                     tv.send(data: Array((command + "\r").utf8)[...])
                 }
             } else {
-                self.pollAndSend(tv: tv, command: command, attempt: attempt + 1)
+                // Recurse: same coordinator/generation still applies.
+                guard let coordinator else { return }
+                self.pollAndSend(tv: tv, command: command, coordinator: coordinator, attempt: attempt + 1)
             }
         }
     }
@@ -122,6 +144,13 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
         nonisolated(unsafe) let onTerminated: ((Int32) -> Void)?
         nonisolated(unsafe) var lastFocusTrigger: UUID? = nil
+        // Bumped every time `makeNSView` is called for a new tv. Captured
+        // by `pollAndSend` and re-checked in the delayed block: if the
+        // EmbeddedTerminalView was rebuilt (e.g. user hit Reset) before
+        // the closure fires, the generation differs and the pending
+        // write is dropped instead of being sent to a deallocated
+        // LocalProcessTerminalView.
+        nonisolated(unsafe) var generation: UInt = 0
 
         nonisolated init(onTerminated: ((Int32) -> Void)?) {
             self.onTerminated = onTerminated
