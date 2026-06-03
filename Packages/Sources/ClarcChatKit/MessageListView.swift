@@ -111,8 +111,7 @@ struct MessageListView: View {
                 // (see settledOnlyMessages) is the only thing focus mode
                 // should affect.
                 StreamingMessageView {
-                    rebuildSettledItems()
-                    if isNearBottom { scrollToBottomDebounced() }
+                    // No-op: structure rebuilds now fire from .onChange modifiers above.
                 }
 
                 if chatBridge.isStreaming {
@@ -166,25 +165,34 @@ struct MessageListView: View {
             try? await Task.sleep(for: .milliseconds(32))  // 2 frames: fade-in after scroll settles
             withAnimation(.easeIn(duration: 0.15)) { isSessionReady = true }
         }
-        // Tier 1 (part 2): text deltas don't change messages.count, so the
-        // existing onChange-of-count trigger never fires while only text is
-        // streaming. This timer drives a periodic settled-list refresh at the
-        // same 50ms cadence as AppState.flushTask upstream, so settledItems
-        // stays in sync with the live streaming tail.
-        .task(id: chatBridge.isStreaming) {
-            guard chatBridge.isStreaming else { return }
-            while !Task.isCancelled && chatBridge.isStreaming {
-                try? await Task.sleep(for: .milliseconds(50))
-                guard !Task.isCancelled else { return }
-                rebuildSettledItems()
-            }
-        }
         .onChange(of: chatBridge.isStreaming) { old, new in
+            // A new turn started — collapse any previously expanded earlier
+            // messages so the chat list stays scrollable once the turn
+            // adds more entries. Without this, expanding the fold stays
+            // sticky for the rest of the session and the list grows
+            // unbounded, which is what made the window feel sluggish.
+            if !old && new {
+                isOlderCollapsed = true
+            }
             // Only update when streaming ends — settled list doesn't change at start, so skip
             if old && !new {
                 rebuildSettledItems()
                 scrollToBottomDebounced()
             }
+        }
+        .onChange(of: chatBridge.messages.count) { _, _ in
+            // A new message was appended (user prompt, tool result that
+            // produced a new assistant turn, etc.). Rebuild the settled
+            // list so the new entry appears in the correct slot.
+            rebuildSettledItems()
+            if isNearBottom { scrollToBottomDebounced() }
+        }
+        .onChange(of: chatBridge.messages.last?.blocks.count) { _, _ in
+            // During streaming, a tool_result that lands on the *current*
+            // streaming message grows its blocks without changing
+            // messages.count. Rebuild so the settled list (and the fold
+            // threshold) reflects the new shape.
+            if chatBridge.isStreaming { rebuildSettledItems() }
         }
         .overlay {
             if settledItems.isEmpty && !chatBridge.isStreaming && windowState.currentSessionId == nil {
