@@ -2383,6 +2383,19 @@ final class AppState {
             detachCurrentStream(in: window)
         }
 
+        // Optionally cancel background streams belonging to other projects
+        // when the user has opted into that behavior via Settings. This
+        // runs BEFORE we mutate window.selectedProject so we can identify
+        // "the new project's id" cleanly. Default off preserves the
+        // existing behavior where multiple projects' streams may run
+        // concurrently.
+        if cancelBackgroundStreamsOnProjectSwitch {
+            let targetProjectId = project.id
+            Task { [weak self] in
+                await self?.cancelBackgroundStreamsExcludingProject(targetProjectId)
+            }
+        }
+
         if let currentId = window.currentSessionId,
            let currentProject = window.selectedProject,
            let state = sessionStates[currentId],
