@@ -110,9 +110,7 @@ struct MessageListView: View {
                 // updates at all. The focus-mode filter on `settledItems`
                 // (see settledOnlyMessages) is the only thing focus mode
                 // should affect.
-                StreamingMessageView {
-                    // No-op: structure rebuilds now fire from .onChange modifiers above.
-                }
+                StreamingMessageView()
 
                 if chatBridge.isStreaming {
                     HStack(alignment: .top, spacing: 0) {
@@ -371,7 +369,6 @@ private func streamingBoundaryIndex(in messages: [ChatMessage]) -> Int {
 struct StreamingMessageView: View {
     @Environment(ChatBridge.self) private var chatBridge
     @Environment(WindowState.self) private var windowState
-    var onStructureChanged: () -> Void
 
     var body: some View {
         let messages = chatBridge.messages
@@ -406,9 +403,6 @@ struct StreamingMessageView: View {
                         .id(message.id)
                 }
             }
-        }
-        .onChange(of: messages.count) { _, _ in
-            onStructureChanged()
         }
     }
 
