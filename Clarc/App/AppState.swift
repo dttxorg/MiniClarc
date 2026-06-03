@@ -257,6 +257,17 @@ final class AppState {
         didSet { UserDefaults.standard.set(foldThreshold, forKey: "foldThreshold") }
     }
 
+    /// When true, switching to a project cancels any background Claude
+    /// streams belonging to other projects. Default false preserves the
+    /// existing behavior where multiple projects' streams may run
+    /// concurrently in the background. See
+    /// docs/superpowers/specs/2026-06-04-background-stream-cleanup-and-settings-i18n.md
+    /// for the full design.
+    var cancelBackgroundStreamsOnProjectSwitch: Bool = (UserDefaults.standard
+        .object(forKey: "cancelBackgroundStreamsOnProjectSwitch") as? Bool) ?? false {
+        didSet { UserDefaults.standard.set(cancelBackgroundStreamsOnProjectSwitch, forKey: "cancelBackgroundStreamsOnProjectSwitch") }
+    }
+
     // MARK: - Custom Rate-Limit / Usage Endpoint
 
     /// Optional user-supplied URL for fetching rate-limit usage. When nil
@@ -2629,9 +2640,27 @@ final class AppState {
         let outgoingMessages = sessionStates[outgoingId]?.allMessages ?? []
         Task { [weak self] in
             guard let self else { return }
-            if !outgoingMessages.isEmpty, let project = window.selectedProject {
-                let title = allSessionSummaries.first(where: { $0.id == outgoingId })?.title ?? "Session"
-                let outgoing = ChatSession(id: outgoingId, projectId: project.id, title: title, messages: outgoingMessages, updatedAt: lastResponseDate(from: outgoingMessages))
+            if !outgoingMessages.isEmpty {
+                // outgoingId may belong to a different project than the current
+                // window's selectedProject (e.g. when switching project focus
+                // mid-stream). Always write to the project the session actually
+                // belongs to — never the window's current focus — otherwise the
+                // legacy .json lands in the wrong projectId directory and the
+                // matching deleteSession (PersistenceService.removeLegacySessionFile)
+                // can't find it. That stale file is then picked up by the next
+                // FSEvent-driven mergedSummaries on the wrong project and the
+                // session "resurrects" in the sidebar with empty content.
+                let summary = allSessionSummaries.first(where: { $0.id == outgoingId })
+                let realProjectId = summary?.projectId ?? window.selectedProject?.id
+                guard let realProjectId else { return }
+                let outgoing = ChatSession(
+                    id: outgoingId,
+                    projectId: realProjectId,
+                    title: summary?.title ?? "Session",
+                    messages: outgoingMessages,
+                    updatedAt: lastResponseDate(from: outgoingMessages),
+                    origin: summary?.origin ?? .cliBacked
+                )
                 do { try await persistence.saveSession(outgoing) }
                 catch { logger.error("Failed to save outgoing session: \(error.localizedDescription)") }
             }
