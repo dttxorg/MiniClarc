@@ -102,7 +102,7 @@ struct MessageListView: View {
             .padding(.horizontal, 20)
             .padding(.top, 16)
 
-            // Streaming view is outside VStack — text deltas don't affect settled layout
+            // Streaming view is in its own sibling container — text deltas don't affect settled layout
             LazyVStack(spacing: 16) {
                 // Tier 1: always render streaming content. The previous
                 // `if !windowState.focusMode` guard made the screen freeze
