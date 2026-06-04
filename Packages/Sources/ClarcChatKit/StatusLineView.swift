@@ -59,6 +59,21 @@ struct StatusLineView: View {
                 Text(formatTotalDuration(totalResponseDuration))
             }
             .foregroundStyle(ClaudeTheme.textTertiary)
+
+            Button {
+                chatBridge.collapseAllPhases.toggle()
+            } label: {
+                Image(systemName: chatBridge.collapseAllPhases
+                      ? "rectangle.stack.badge.minus"
+                      : "rectangle.stack")
+                    .font(.system(size: ClaudeTheme.size(12), weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(ClaudeTheme.textTertiary)
+            .help(chatBridge.collapseAllPhases
+                  ? String(localized: "Expand all phases", bundle: .module)
+                  : String(localized: "Collapse all phases", bundle: .module))
+            .disabled(chatBridge.phaseSummaries.isEmpty)
         }
         .font(.system(size: ClaudeTheme.size(12), weight: .medium, design: .monospaced))
         .padding(.leading, 12)
