@@ -30,12 +30,6 @@ struct SessionStreamState {
     /// terminal transcript). Survives disk reloads — disk only owns committedMessages.
     var localAddendum: [ChatMessage] = []
 
-    /// Per-turn roll-up summaries appended when an assistant turn completes.
-    /// Pushed to the UI via `ChatBridge.phaseSummaries`. Cleared on
-    /// session switch / reload (the messages themselves carry the same
-    /// information; the summaries are a presentation cache).
-    var phaseSummaries: [PhaseSummary] = []
-
     /// The window that owns this session's stream. Set in
     /// `setupChatBridge` so streaming closures can read the per-window
     /// `taskProgressStore` (and any future per-window resources).
@@ -1325,20 +1319,12 @@ final class AppState {
                     Self.stripNoOpText(at: idx, in: &state.streamingTail!.messages)
 
                     if let survivingIdx = state.streamingTail!.messages.firstIndex(where: { $0.id == finalizedID }) {
-                        // Build a per-turn roll-up summary for the just-finished
-                        // turn. Pushed to ChatBridge.phaseSummaries for the UI to
-                        // render as a collapsible card. See `PhaseSummary` for
-                        // the per-turn model.
-                        let summary = Self.makePhaseSummary(
-                            forMessage: state.streamingTail!.messages[survivingIdx],
-                            turnMessageIDs: state.streamingTail!.messages.map(\.id),
-                            previousSummaries: state.phaseSummaries,
-                            streamingStartDate: state.streamingStartDate
-                        )
-                        state.phaseSummaries.append(summary)
+                        // Surviving message index captured for downstream
+                        // consumers; no phase summary to build anymore.
+                        _ = survivingIdx
                     }
-                    // If the message was stripped, there's nothing to
-                    // summarize — skip the phase summary silently.
+                    // If the message was stripped, there's nothing left
+                    // to surface — skip silently.
                 }
             }
 
@@ -1346,72 +1332,6 @@ final class AppState {
 
             state.streamingStartDate = nil
         }
-    }
-
-    /// Construct a PhaseSummary from the just-finalized assistant message.
-    ///
-    /// The summary is a presentation cache; the source of truth for
-    /// "what happened in this turn" remains the underlying ChatMessage
-    /// array (carried by `summary.messageIDs`). Re-deriving from the
-    /// message each turn is cheap (a few `toolCall`s, one text block)
-    /// and avoids the source-of-truth drift you'd get from a parallel
-    /// accumulator.
-    private static func makePhaseSummary(
-        forMessage message: ChatMessage,
-        turnMessageIDs: [UUID],
-        previousSummaries: [PhaseSummary],
-        streamingStartDate: Date?
-    ) -> PhaseSummary {
-        let invocations: [PhaseSummary.ToolInvocation] = message.toolCalls.map { tc in
-            let status: PhaseSummary.ToolInvocation.Status
-            if tc.isError { status = .failed }
-            else if tc.result == nil { status = .unverified }
-            else { status = .succeeded }
-            return PhaseSummary.ToolInvocation(
-                name: tc.name,
-                inputSummary: Self.summarizeToolInput(tc),
-                status: status
-            )
-        }
-
-        let unverifiedCount = invocations.filter { $0.status == .unverified }.count
-        let failedCount = invocations.filter { $0.status == .failed }.count
-        let readyForReview = (failedCount == 0 && unverifiedCount == 0)
-
-        // The last text block carries the assistant's final reply; we
-        // scan it for a "next step" suggestion.
-        let finalText = message.blocks.reversed().compactMap { $0.text }.first ?? ""
-        let suggestedNext = PhaseSummary.extractSuggestedNext(from: finalText)
-
-        let changeSummary = PhaseSummary.summarizeChanges(from: invocations)
-
-        // Best-effort wall-clock bounds. streamingStartDate is cleared
-        // immediately after this method runs, so capture it now.
-        let endedAt = Date()
-        let startedAt = streamingStartDate ?? message.timestamp
-        let duration = max(0, endedAt.timeIntervalSince(startedAt))
-
-        return PhaseSummary(
-            phaseIndex: previousSummaries.count,
-            startedAt: startedAt,
-            endedAt: endedAt,
-            durationSeconds: duration,
-            toolInvocations: invocations,
-            unverifiedCommandCount: unverifiedCount,
-            failedInvocationCount: failedCount,
-            readyForReview: readyForReview,
-            changeSummary: changeSummary,
-            suggestedNext: suggestedNext,
-            // Capture every message accumulated during this turn —
-            // typically [user prompt, ...assistant sub-messages with
-            // thinking/text/tool calls, tool results] — so that
-            // expanding the phase card replays the full turn instead
-            // of a single (often incomplete) assistant message. If
-            // `turnMessageIDs` is empty (e.g. stripNoOpText removed the
-            // surviving message), fall back to the surviving message's
-            // own id so the card is still anchored to something.
-            messageIDs: turnMessageIDs.isEmpty ? [message.id] : turnMessageIDs
-        )
     }
 
     /// Extract a short human-readable input summary from a single tool
@@ -1452,67 +1372,6 @@ final class AppState {
             if let pattern = stringValue(for: ["pattern"]) { return pattern }
         }
         return "(no input)"
-    }
-
-    /// Walk a list of committed messages and synthesize a PhaseSummary
-    /// for each completed assistant turn. Used at session load so that
-    /// historical chats (loaded from disk jsonl) get the Codex-style
-    /// per-turn card without waiting for a fresh turn.
-    ///
-    /// The synthesized summaries are intentionally less precise than
-    /// the live ones (no wall-clock duration, no live streamingStartDate)
-    /// — the source of truth for "what happened" is the underlying
-    /// ChatMessage.phaseIndex here just gives a stable ordering.
-    private static func synthesizePhaseSummaries(
-        forMessages messages: [ChatMessage]
-    ) -> [PhaseSummary] {
-        var summaries: [PhaseSummary] = []
-        for message in messages {
-            guard message.role == .assistant,
-                  message.isResponseComplete,
-                  !message.isError,
-                  !message.toolCalls.isEmpty || message.blocks.contains(where: { $0.isText }) else {
-                continue
-            }
-
-            let invocations = message.toolCalls.map { tc -> PhaseSummary.ToolInvocation in
-                let status: PhaseSummary.ToolInvocation.Status
-                if tc.isError { status = .failed }
-                else if tc.result == nil { status = .unverified }
-                else { status = .succeeded }
-                return PhaseSummary.ToolInvocation(
-                    name: tc.name,
-                    inputSummary: summarizeToolInput(tc),
-                    status: status
-                )
-            }
-
-            let unverifiedCount = invocations.filter { $0.status == .unverified }.count
-            let failedCount = invocations.filter { $0.status == .failed }.count
-            let finalText = message.blocks.reversed().compactMap { $0.text }.first ?? ""
-            let suggestedNext = PhaseSummary.extractSuggestedNext(from: finalText)
-            let changeSummary = PhaseSummary.summarizeChanges(from: invocations)
-
-            // Use message.duration when present (set by the streaming
-            // pipeline); fall back to 0 for old jsonl messages that
-            // pre-date the duration field.
-            let duration = message.duration ?? 0
-
-            summaries.append(PhaseSummary(
-                phaseIndex: summaries.count,
-                startedAt: message.timestamp,
-                endedAt: message.timestamp.addingTimeInterval(duration),
-                durationSeconds: duration,
-                toolInvocations: invocations,
-                unverifiedCommandCount: unverifiedCount,
-                failedInvocationCount: failedCount,
-                readyForReview: (failedCount == 0 && unverifiedCount == 0),
-                changeSummary: changeSummary,
-                suggestedNext: suggestedNext,
-                messageIDs: [message.id]
-            ))
-        }
-        return summaries
     }
 
     /// Drop "No response requested." text blocks from the assistant message
@@ -2648,13 +2507,6 @@ final class AppState {
             if let msgs = loadedMessages {
                 state.committedMessages = cleanLoadedMessages(msgs)
             }
-            // Synthesize PhaseSummary objects for any completed assistant
-            // turns loaded from disk. This makes sessions opened after the
-            // v2.1.0 feature shipped show the new Codex-style phase cards
-            // for their historical turns, not just future ones.
-            state.phaseSummaries = Self.synthesizePhaseSummaries(
-                forMessages: state.committedMessages
-            )
             sessionStates[session.id] = state
             // Stale reload cache would cause reloadCommittedFromDisk to skip parsing when messages are empty.
             lastCommittedReloadKey.removeValue(forKey: session.id)
