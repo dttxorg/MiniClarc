@@ -48,6 +48,10 @@ public final class ChatBridge {
     public var editAndResendHandler: ((UUID, String) async -> Void)?
     public var forkFromHereHandler: ((UUID) async -> Void)?
     public var fetchRateLimitHandler: (() async -> RateLimitUsage?)?
+    /// Trigger a context compaction for the current session. Wired
+    /// up by `AppState.setupChatBridge` to call
+    /// `compactService.run(in: window)`.
+    public var compactHandler: (() async -> Void)?
 
     // MARK: - Init
 
@@ -81,5 +85,10 @@ public final class ChatBridge {
 
     public func fetchRateLimit() async -> RateLimitUsage? {
         await fetchRateLimitHandler?()
+    }
+
+    /// Manually trigger context compaction for the current session.
+    public func compact() async {
+        await compactHandler?()
     }
 }

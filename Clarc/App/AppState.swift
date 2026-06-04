@@ -854,6 +854,10 @@ final class AppState {
             guard let self, let window else { return }
             await self.runTerminalCommand(command, in: window)
         }
+        bridge.compactHandler = { [weak self, weak window] in
+            guard let self, let window else { return }
+            _ = try? await self.compactService.run(in: window)
+        }
         bridge.editAndResendHandler = { [weak self, weak window] messageId, newContent in
             guard let self, let window else { return }
             await self.editAndResend(messageId: messageId, newContent: newContent, in: window)

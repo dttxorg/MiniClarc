@@ -73,6 +73,17 @@ struct StatusLineView: View {
             .help(chatBridge.collapseAllTurns
                   ? String(localized: "Expand all turns", bundle: .module)
                   : String(localized: "Collapse all turns", bundle: .module))
+
+            Button {
+                Task { await chatBridge.compact() }
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: ClaudeTheme.size(12), weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(ClaudeTheme.textTertiary)
+            .help(String(localized: "Compact context", bundle: .module))
+            .disabled(chatBridge.messages.count < 2)
         }
         .font(.system(size: ClaudeTheme.size(12), weight: .medium, design: .monospaced))
         .padding(.leading, 12)
