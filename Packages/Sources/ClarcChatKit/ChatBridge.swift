@@ -32,6 +32,10 @@ public final class ChatBridge {
     /// on the next turn. Pushed from `AppState` via
     /// `SessionStreamState.compactionRecord`.
     public var compactionRecord: CompactionRecord?
+    /// Auto-compact when total estimated tokens of the live
+    /// `messages` exceed this value. 0 = disabled. Pushed from
+    /// `AppState.autoCompactThreshold`.
+    public var autoCompactThreshold: Int = 0
     public var streamingStartDate: Date?
     public var lastTurnContextUsedPercentage: Double?
     public var modelDisplayName: String = ""

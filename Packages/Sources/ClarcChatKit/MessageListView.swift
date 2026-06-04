@@ -113,6 +113,7 @@ struct MessageListView: View {
             // list so the new entry appears in the correct slot.
             rebuildSettledItems()
             if isNearBottom { scrollToBottomDebounced() }
+            checkAutoCompact()
         }
         .onChange(of: chatBridge.messages.last?.blocks.count) { _, _ in
             // During streaming, a tool_result that lands on the *current*
@@ -261,6 +262,22 @@ struct MessageListView: View {
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else { return }
             scrollPosition.scrollTo(edge: .bottom)
+        }
+    }
+
+    /// If auto-compact is enabled and the estimated token count of
+    /// the live messages exceeds the threshold, trigger a compact
+    /// in a detached task. Guards:
+    /// - !isStreaming (don't interrupt an active response)
+    /// - the trigger itself is idempotent because
+    ///   CompactService.inFlight coalesces concurrent calls
+    private func checkAutoCompact() {
+        guard chatBridge.autoCompactThreshold > 0 else { return }
+        guard !chatBridge.isStreaming else { return }
+        let estimate = TokenEstimator.estimate(chatBridge.messages)
+        guard estimate > chatBridge.autoCompactThreshold else { return }
+        Task { @MainActor in
+            await chatBridge.compact()
         }
     }
 }

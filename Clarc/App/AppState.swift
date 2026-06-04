@@ -892,6 +892,7 @@ final class AppState {
                 bridge.isStreaming = state.isStreaming
                 bridge.isThinking = state.isThinking
                 bridge.compactionRecord = state.compactionRecord
+                bridge.autoCompactThreshold = autoCompactThreshold
                 bridge.streamingStartDate = state.streamingStartDate
                 bridge.lastTurnContextUsedPercentage = state.lastTurnContextUsedPercentage
                 bridge.modelDisplayName = modelDisplayName(for: window.sessionModel ?? selectedModel, in: window)
