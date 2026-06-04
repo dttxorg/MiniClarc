@@ -1209,3 +1209,11 @@ git tag v2.5.1
    - SlashCommand init 签名(中,grep 提醒)
    - appState.showError / toast 模式(中,grep 提醒)
    - runShellCommand 是否支持 workingDirectory(中,grep 提醒;如果不支持用 default cwd)
+
+## CLI 验证结果(2026-06-04)
+
+手动跑 `claude -p "say hi in 3 words" --system-prompt "You are a parrot. Always say 'Polly wants a' before your response." --output-format text` → 返回 `Polly wants a cracker!`,模型正确遵循 system prompt。
+
+`--resume` 的兼容性: `ClaudeService.fetchContextPercentage(sessionId:cwd:)` 已经在生产代码里使用 `claude -p "/context" --output-format text --resume <sid>`,意味着 `-p + --resume` 组合已被先例验证可用。
+
+**结论**: 通道 A (`-p + --system-prompt + --resume`) 可行,不需要降级到 stdin 注入。
