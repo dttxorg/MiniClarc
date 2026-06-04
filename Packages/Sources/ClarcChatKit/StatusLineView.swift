@@ -61,19 +61,18 @@ struct StatusLineView: View {
             .foregroundStyle(ClaudeTheme.textTertiary)
 
             Button {
-                chatBridge.collapseAllPhases.toggle()
+                chatBridge.collapseAllTurns.toggle()
             } label: {
-                Image(systemName: chatBridge.collapseAllPhases
+                Image(systemName: chatBridge.collapseAllTurns
                       ? "rectangle.stack.badge.minus"
                       : "rectangle.stack")
                     .font(.system(size: ClaudeTheme.size(12), weight: .medium))
             }
             .buttonStyle(.plain)
             .foregroundStyle(ClaudeTheme.textTertiary)
-            .help(chatBridge.collapseAllPhases
-                  ? String(localized: "Expand all phases", bundle: .module)
-                  : String(localized: "Collapse all phases", bundle: .module))
-            .disabled(chatBridge.phaseSummaries.isEmpty)
+            .help(chatBridge.collapseAllTurns
+                  ? String(localized: "Expand all turns", bundle: .module)
+                  : String(localized: "Collapse all turns", bundle: .module))
         }
         .font(.system(size: ClaudeTheme.size(12), weight: .medium, design: .monospaced))
         .padding(.leading, 12)

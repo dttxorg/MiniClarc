@@ -8,22 +8,6 @@ import SwiftUI
 import Combine
 import ClarcCore
 
-// MARK: - Phase Force-Collapse Environment
-
-private struct PhaseForceCollapseKey: EnvironmentKey {
-    static let defaultValue: Bool = false
-}
-
-extension EnvironmentValues {
-    /// When true, PhaseSummaryCard renders collapsed regardless of its
-    /// own isExpanded state. Set by MessageListView when the user has
-    /// activated the "collapse all phases" toggle.
-    var phaseForceCollapse: Bool {
-        get { self[PhaseForceCollapseKey.self] }
-        set { self[PhaseForceCollapseKey.self] = newValue }
-    }
-}
-
 /// Message scroll area — extracted from ChatView to isolate @Observable dependencies on `messages`.
 struct MessageListView: View {
     @Environment(ChatBridge.self) private var chatBridge
@@ -41,13 +25,7 @@ struct MessageListView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                settledContent(
-                    summariesByMessageID: Dictionary(
-                        uniqueKeysWithValues: chatBridge.phaseSummaries.flatMap { summary in
-                            summary.messageIDs.map { ($0, summary) }
-                        }
-                    )
-                )
+                settledContent()
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -98,7 +76,7 @@ struct MessageListView: View {
             isSessionReady = false
             scrollTask?.cancel()
             isOlderCollapsed = true
-            chatBridge.collapseAllPhases = false
+            chatBridge.collapseAllTurns = false
             scrollPosition = ScrollPosition()
             rebuildSettledItems()
             // Skip scroll/fade delay for empty sessions — appear instantly
@@ -151,11 +129,11 @@ struct MessageListView: View {
         }
     }
 
-    /// Fold-by-threshold placeholder button. Shown above the message
-    /// list whenever the user has folded some earlier messages out of
-    /// view. The label switches between "Show N earlier messages" and
-    /// "Collapse earlier messages" based on the current state. Behavior
-    /// is identical for the legacy and phase paths.
+    /// Renders the fold placeholder + the per-turn message rows.
+    /// The fold placeholder is shown whenever the user has folded
+    /// some earlier turns out of view. The label switches between
+    /// "Show N earlier turns" and "Collapse earlier turns" based on
+    /// the current state.
     private func foldToggleButton(hiddenCount: Int) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.25)) {
@@ -165,9 +143,9 @@ struct MessageListView: View {
             HStack(spacing: 6) {
                 Group {
                     if isOlderCollapsed {
-                        Text(String(format: String(localized: "Show %lld earlier phases", bundle: .module), hiddenCount))
+                        Text(String(format: String(localized: "Show %lld earlier turns", bundle: .module), hiddenCount))
                     } else {
-                        Text("Collapse earlier phases", bundle: .module)
+                        Text("Collapse earlier turns", bundle: .module)
                     }
                 }
                 .font(.system(size: ClaudeTheme.size(12), weight: .medium))
@@ -185,47 +163,43 @@ struct MessageListView: View {
         .buttonStyle(.plain)
     }
 
-    /// Renders the fold placeholder + the settled message rows.
-    /// Extracted from `body` so the compiler can type-check the
-    /// nested `if` chain in a smaller context (without the outer
-    /// ScrollView modifiers, the `messageRows(settledItems.suffix(...))`
-    /// call site can no longer exhaust the type-checker's budget).
-    ///
-    /// When at least one phase summary exists we render via
-    /// `chatWithPhases` which prepends each phase card to its
-    /// assistant message. Otherwise we fall back to plain
-    /// `messageRows` so older sessions without phase data still
-    /// work. The fold placeholder is identical in both paths.
+    /// Renders the fold placeholder + the settled turns. Each turn
+    /// is wrapped in a `TurnBlock` that knows how to render itself
+    /// collapsed or expanded.
     @ViewBuilder
-    private func settledContent(summariesByMessageID: [UUID: PhaseSummary]) -> some View {
+    private func settledContent() -> some View {
         let foldThresh = max(0, windowState.foldThreshold)
-        let hiddenCount = max(0, settledItems.count - foldThresh)
+        let visible = makeVisibleTurns()
+        let hiddenCount = max(0, visible.count - foldThresh)
 
-        if foldThresh > 0 && hiddenCount > 0 {
+        if foldThresh > 0 && hiddenCount > 0 && isOlderCollapsed {
             foldToggleButton(hiddenCount: hiddenCount)
         }
 
-        if chatBridge.phaseSummaries.isEmpty {
-            if hiddenCount > 0 {
-                messageRows(Array(settledItems.suffix(foldThresh)))
-            } else {
-                messageRows(settledItems)
+        if hiddenCount > 0 && isOlderCollapsed {
+            ForEach(visible.suffix(foldThresh)) { turn in
+                TurnBlock(turn: turn, forceCollapsed: chatBridge.collapseAllTurns)
+                    .id(turn.id)
             }
         } else {
-            let totalPhases = chatBridge.phaseSummaries.count
-            // foldThreshold == 0 means "Off" — the user explicitly
-            // opted out of folding and should see all phases
-            // (capped only by the virtualization limit).
-            let visibleEnd = foldThresh == 0 ? totalPhases : min(foldThresh, 100)
-            let visibleStart = max(0, totalPhases - visibleEnd)
-            chatWithPhases(
-                visibleRange: visibleStart..<totalPhases,
-                phaseSummaries: chatBridge.phaseSummaries,
-                allSummariesByMessageID: summariesByMessageID,
-                allMessages: settledItems,
-                forceCollapse: chatBridge.collapseAllPhases
-            )
+            ForEach(visible) { turn in
+                TurnBlock(turn: turn, forceCollapsed: chatBridge.collapseAllTurns)
+                    .id(turn.id)
+            }
         }
+    }
+
+    /// Build the turn list and apply the fold-threshold + virtualization cap.
+    private func makeVisibleTurns() -> [Turn] {
+        let all = Turn.makeTurns(
+            from: settledItems,
+            isStreamingLast: chatBridge.isStreaming,
+            foldThreshold: windowState.foldThreshold
+        )
+        // Cap to foldThreshold + 100 visible (old phase-fold cap reused).
+        let cap = max(0, windowState.foldThreshold) + 100
+        if all.count <= cap { return all }
+        return Array(all.suffix(cap))
     }
 
     // MARK: - Helpers
@@ -240,43 +214,6 @@ struct MessageListView: View {
             } else if let message = group.messages.first {
                 MessageBubble(message: message)
                     .id(message.id)
-            }
-        }
-    }
-
-    /// Render only phase-owned messages within `visibleRange`. The legacy
-    /// (non-phase) fallback path is responsible for orphan user / assistant
-    /// messages that are not part of any phase — `settledContent` calls the
-    /// legacy `messageRows(settledItems.suffix(foldThresh))` when phases are
-    /// empty, and that already covers the user prompts + non-phase assistants.
-    /// This helper exists to render just the cards for the *visible* slice
-    /// of phases, so a session with >100 phases doesn't inflate hundreds
-    /// of `MessageBubble`s into the VStack simultaneously.
-    @ViewBuilder
-    private func chatWithPhases(
-        visibleRange: Range<Int>,
-        phaseSummaries: [PhaseSummary],
-        allSummariesByMessageID: [UUID: PhaseSummary],
-        allMessages: [ChatMessage],
-        forceCollapse: Bool
-    ) -> some View {
-        ForEach(Array(phaseSummaries[visibleRange].enumerated()), id: \.element.id) { _, summary in
-            let ownedMessageIDs = Set(summary.messageIDs)
-            // Pull every message that belongs to this turn (typically
-            // [user prompt, ...assistant sub-messages, tool results])
-            // so the expanded card replays the full turn instead of a
-            // single (often incomplete) assistant message. Preserve
-            // streamingTail.messages's original order so the
-            // user-prompt-then-assistant-then-tool-result timeline is
-            // visible top-to-bottom.
-            let ownedMessages = allMessages
-                .enumerated()
-                .filter { ownedMessageIDs.contains($0.element.id) }
-                .map(\.element)
-            if !ownedMessages.isEmpty {
-                PhaseSummaryCard(summary: summary, messages: ownedMessages)
-                    .id(summary.id)
-                    .environment(\.phaseForceCollapse, forceCollapse)
             }
         }
     }
@@ -393,6 +330,84 @@ fileprivate func groupMessages(_ messages: [ChatMessage], minGroupSize: Int = 2)
     flushAccumulator()
 
     return result
+}
+
+// MARK: - Turn Block
+
+/// One collapsible block per user turn. Renders either a 30/50-char
+/// preview (collapsed) or the full message bubbles (expanded). The
+/// collapsed preview never builds the bubble subtrees, so a long
+/// history with many collapsed turns stays cheap.
+private struct TurnBlock: View {
+    let turn: Turn
+    let forceCollapsed: Bool
+
+    @State private var isCollapsedLocal: Bool
+
+    init(turn: Turn, forceCollapsed: Bool) {
+        self.turn = turn
+        self.forceCollapsed = forceCollapsed
+        _isCollapsedLocal = State(initialValue: turn.isCollapsed)
+    }
+
+    private var isCollapsed: Bool {
+        forceCollapsed || isCollapsedLocal
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isCollapsedLocal.toggle()
+                }
+            } label: {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 16, height: 16)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 4) {
+                if isCollapsed {
+                    collapsedSummary
+                } else {
+                    expandedContent
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(ClaudeTheme.surfacePrimary))
+        )
+    }
+
+    private var collapsedSummary: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(turn.collapsedUserText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(ClaudeTheme.textTertiary)
+                .lineLimit(1)
+            Text(turn.collapsedAssistantText)
+                .font(.system(size: 12))
+                .foregroundStyle(ClaudeTheme.textSecondary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var expandedContent: some View {
+        // Skip the placeholder for orphan turns
+        if !turn.userMessage.content.isEmpty {
+            MessageBubble(message: turn.userMessage)
+        }
+        ForEach(turn.assistantMessages) { msg in
+            MessageBubble(message: msg)
+        }
+    }
 }
 
 // MARK: - Shared Helper
@@ -573,191 +588,5 @@ struct ElapsedTimeView: View {
             .onReceive(timer) { _ in
                 elapsed = Date().timeIntervalSince(startDate)
             }
-    }
-}
-
-// MARK: - Phase Summary Card
-
-/// Per-turn roll-up card. Collapsed by default — shows a 3-line summary
-/// (Phase N header with duration, the change summary, the verification
-/// status). Clicking the header expands the card to reveal the
-/// underlying assistant message bubble plus per-tool-call log.
-///
-/// The collapsed-then-expand UX mirrors Codex TUI's per-task roll-up
-/// cards. User expands a card to audit what the turn did; the default
-/// view stays clean.
-struct PhaseSummaryCard: View {
-    let summary: PhaseSummary
-    let messages: [ChatMessage]
-
-    @State private var isExpanded: Bool = false
-    @State private var elapsed: Double = 0
-    @Environment(\.phaseForceCollapse) private var phaseForceCollapse
-
-    private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    /// Pre-compute the "1m 23s" / "45s" duration string from the
-    /// snapshot. We bind this once per render; the live update is only
-    /// relevant for the currently streaming turn, which doesn't have a
-    /// `PhaseSummary` yet, so for completed phases this is static.
-    private var durationText: String {
-        let s = summary.durationSeconds
-        if s < 60 { return "\(Int(s))s" }
-        let minutes = Int(s) / 60
-        let seconds = Int(s) % 60
-        return "\(minutes)m \(seconds)s"
-    }
-
-    private var statusIcon: String {
-        if summary.failedInvocationCount > 0 { return "exclamationmark.triangle.fill" }
-        if summary.unverifiedCommandCount > 0 { return "questionmark.circle" }
-        if summary.readyForReview { return "checkmark.seal.fill" }
-        return "circle.dashed"
-    }
-
-    private var statusColor: Color {
-        if summary.failedInvocationCount > 0 { return .red }
-        if summary.unverifiedCommandCount > 0 { return .orange }
-        if summary.readyForReview { return .green }
-        return .secondary
-    }
-
-    private var statusText: String {
-        if summary.failedInvocationCount > 0 {
-            return "\(summary.failedInvocationCount) failed"
-        }
-        if summary.unverifiedCommandCount > 0 {
-            return "\(summary.unverifiedCommandCount) unverified"
-        }
-        if summary.readyForReview {
-            let n = summary.toolInvocations.count
-            return n == 0 ? "no tool calls" : "\(n) tool\(n == 1 ? "" : "s") ok"
-        }
-        return "—"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Collapsed header — always visible. The card has a
-            // distinctive left-edge color bar to set it apart from
-            // regular MessageBubbles (the fold / roll-up is the new
-            // shape and needs to be visually obvious).
-            HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(statusColor)
-                    .frame(width: 3)
-                    .clipShape(RoundedRectangle(cornerRadius: 1.5))
-                    .padding(.vertical, 4)
-                    .padding(.trailing, 8)
-                VStack(alignment: .leading, spacing: 0) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isExpanded.toggle()
-                        }
-                    } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: statusIcon)
-                                .font(.system(size: ClaudeTheme.size(13)))
-                                .foregroundStyle(statusColor)
-                                .frame(width: 16, alignment: .center)
-                                .padding(.top, 2)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 6) {
-                                    // "PHASE 1" badge in monospace.
-                                    Text("PHASE \(summary.phaseIndex + 1)")
-                                        .font(.system(size: ClaudeTheme.size(11), weight: .bold, design: .monospaced))
-                                        .foregroundStyle(statusColor)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 1)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 3)
-                                                .fill(statusColor.opacity(0.12))
-                                        )
-                                    Text(durationText)
-                                        .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
-                                        .foregroundStyle(ClaudeTheme.textTertiary)
-                                    Spacer()
-                                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: ClaudeTheme.size(10)))
-                                        .foregroundStyle(ClaudeTheme.textTertiary)
-                                }
-
-                                if !summary.changeSummary.isEmpty {
-                                    Text(summary.changeSummary)
-                                        .font(.system(size: ClaudeTheme.size(11)))
-                                        .foregroundStyle(ClaudeTheme.textSecondary)
-                                        .lineLimit(1)
-                                }
-
-                                HStack(spacing: 6) {
-                                    Text(statusText)
-                                        .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                                        .foregroundStyle(statusColor)
-                                    if !summary.suggestedNext.isEmpty {
-                                        Text("·")
-                                            .foregroundStyle(ClaudeTheme.textTertiary)
-                                        Text(summary.suggestedNext)
-                                            .font(.system(size: ClaudeTheme.size(11)))
-                                            .foregroundStyle(ClaudeTheme.textSecondary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.vertical, 10)
-                        .padding(.trailing, 10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .background(
-                RoundedRectangle(cornerRadius: ClaudeTheme.cornerRadiusSmall)
-                    .fill(ClaudeTheme.surfacePrimary.opacity(0.6))
-            )
-
-            // Expanded body — per-tool-call log + the assistant bubble.
-            if (isExpanded && !phaseForceCollapse) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if !summary.toolInvocations.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(summary.toolInvocations.enumerated()), id: \.offset) { _, invocation in
-                                HStack(alignment: .top, spacing: 6) {
-                                    Image(systemName: invocation.status == .failed
-                                          ? "xmark.circle.fill"
-                                          : (invocation.status == .unverified ? "questionmark.circle" : "checkmark.circle.fill"))
-                                        .font(.system(size: ClaudeTheme.size(10)))
-                                        .foregroundStyle(invocation.status == .failed
-                                                         ? .red
-                                                         : (invocation.status == .unverified ? .orange : .green))
-                                        .frame(width: 12)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(invocation.name)
-                                            .font(.system(size: ClaudeTheme.size(11), weight: .medium))
-                                        Text(invocation.inputSummary)
-                                            .font(.system(size: ClaudeTheme.size(10), design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(ClaudeTheme.surfaceElevated)
-                        )
-                    }
-                    ForEach(messages) { msg in
-                        MessageBubble(message: msg)
-                            .id(msg.id)
-                    }
-                }
-                .padding(.top, 4)
-                .padding(.leading, 11)  // align with header text (3 + 8)
-            }
-        }
     }
 }

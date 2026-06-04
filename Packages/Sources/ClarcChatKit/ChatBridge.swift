@@ -20,18 +20,12 @@ public final class ChatBridge {
     public var messages: [ChatMessage] = []
     public var isStreaming: Bool = false
     public var isThinking: Bool = false
-    /// Per-turn summaries for completed assistant turns, oldest first. Pushed
-    /// by AppState when `finalizeStreamSession` runs. The most recent (last
-    /// element) is the "current phase" — its messages stream live and its
-    /// summary is generated on completion. Older entries are auto-collapsed
-    /// in the UI by default; the user can expand any one to inspect.
-    public var phaseSummaries: [PhaseSummary] = []
-    /// When true, every PhaseSummaryCard in the chat list is rendered
-    /// collapsed regardless of its own isExpanded state. This is a
-    /// per-window, transient UI state — toggled by a "collapse all" button
-    /// in the message toolbar. It does NOT mutate the per-card stored
-    /// isExpanded state. Reset to false when the window switches sessions.
-    public var collapseAllPhases: Bool = false
+    /// When true, every Turn in the chat list is rendered collapsed
+    /// regardless of its own `isCollapsed` state. This is a per-window,
+    /// transient UI state — toggled by a "collapse all" button in the
+    /// message toolbar. It does NOT mutate per-turn stored state.
+    /// Reset to false when the window switches sessions.
+    public var collapseAllTurns: Bool = false
     public var streamingStartDate: Date?
     public var lastTurnContextUsedPercentage: Double?
     public var modelDisplayName: String = ""

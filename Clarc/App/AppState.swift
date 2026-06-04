@@ -880,7 +880,6 @@ final class AppState {
                 bridge.messages = state.allMessages
                 bridge.isStreaming = state.isStreaming
                 bridge.isThinking = state.isThinking
-                bridge.phaseSummaries = state.phaseSummaries
                 bridge.streamingStartDate = state.streamingStartDate
                 bridge.lastTurnContextUsedPercentage = state.lastTurnContextUsedPercentage
                 bridge.modelDisplayName = modelDisplayName(for: window.sessionModel ?? selectedModel, in: window)
