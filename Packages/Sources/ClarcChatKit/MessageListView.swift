@@ -25,61 +25,13 @@ struct MessageListView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // Codex-style per-turn roll-up cards interleaved with the
-                // chat bubbles. When at least one phase summary exists
-                // (i.e. at least one assistant turn has completed), we
-                // render via `chatWithPhases` which prepends each phase
-                // card to its assistant message. The legacy
-                // "show N earlier messages" fold button is suppressed
-                // in that case — phase cards are already collapsed by
-                // default and the user expands them individually.
-                //
-                // When no phase summaries exist (e.g. a session loaded
-                // from disk that pre-dates the phase feature), fall
-                // back to the old fold-threshold rendering so the chat
-                // list is still usable.
-                let phaseMessageIDs = Set(chatBridge.phaseSummaries.flatMap { $0.messageIDs })
-                let summariesByMessageID = Dictionary(
-                    uniqueKeysWithValues: chatBridge.phaseSummaries.flatMap { summary in
-                        summary.messageIDs.map { ($0, summary) }
-                    }
-                )
-
-                // The fold placeholder + message rows are rendered in
-                // BOTH paths. The placeholder appears whenever
-                // (settledItems.count - foldThreshold) > 0, independent
-                // of whether phase summaries exist.
-                let foldThresh = max(0, windowState.foldThreshold)
-                let hiddenCount = max(0, settledItems.count - foldThresh)
-
-                // 1. Fold placeholder (when threshold is exceeded)
-                if foldThresh > 0 && hiddenCount > 0 {
-                    foldToggleButton(hiddenCount: hiddenCount)
-                }
-
-                // 2. The actual content. Either the phase path (when
-                //    phase summaries exist) or the legacy messageRows
-                //    path.
-                if chatBridge.phaseSummaries.isEmpty {
-                    // Legacy: just message rows
-                    if hiddenCount > 0 {
-                        messageRows(settledItems.suffix(foldThresh))
-                    } else {
-                        messageRows(settledItems[...])
-                    }
-                } else {
-                    // Phase path with virtualization cap at 100 phases
-                    let totalPhases = chatBridge.phaseSummaries.count
-                    let visibleEnd = min(foldThresh, 100)
-                    let visibleStart = max(0, totalPhases - visibleEnd)
-                    chatWithPhases(
-                        visibleRange: visibleStart..<totalPhases,
-                        phaseSummaries: chatBridge.phaseSummaries,
-                        allSummariesByMessageID: summariesByMessageID,
-                        allMessages: settledItems,
-                        forceCollapse: chatBridge.collapseAllPhases
+                settledContent(
+                    summariesByMessageID: Dictionary(
+                        uniqueKeysWithValues: chatBridge.phaseSummaries.flatMap { summary in
+                            summary.messageIDs.map { ($0, summary) }
+                        }
                     )
-                }
+                )
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -130,6 +82,7 @@ struct MessageListView: View {
             isSessionReady = false
             scrollTask?.cancel()
             isOlderCollapsed = true
+            chatBridge.collapseAllPhases = false
             scrollPosition = ScrollPosition()
             rebuildSettledItems()
             // Skip scroll/fade delay for empty sessions — appear instantly
@@ -179,6 +132,80 @@ struct MessageListView: View {
                 EmptySessionView()
                     .allowsHitTesting(false)
             }
+        }
+    }
+
+    /// Fold-by-threshold placeholder button. Shown above the message
+    /// list whenever the user has folded some earlier messages out of
+    /// view. The label switches between "Show N earlier messages" and
+    /// "Collapse earlier messages" based on the current state. Behavior
+    /// is identical for the legacy and phase paths.
+    private func foldToggleButton(hiddenCount: Int) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isOlderCollapsed.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Group {
+                    if isOlderCollapsed {
+                        Text(String(format: String(localized: "Show %lld earlier messages", bundle: .module), hiddenCount))
+                    } else {
+                        Text("Collapse earlier messages", bundle: .module)
+                    }
+                }
+                .font(.system(size: ClaudeTheme.size(12), weight: .medium))
+                Image(systemName: isOlderCollapsed ? "chevron.down" : "chevron.up")
+                    .font(.system(size: ClaudeTheme.size(10), weight: .medium))
+            }
+            .foregroundStyle(ClaudeTheme.textTertiary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: ClaudeTheme.cornerRadiusSmall)
+                    .fill(ClaudeTheme.surfacePrimary.opacity(0.6))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Renders the fold placeholder + the settled message rows.
+    /// Extracted from `body` so the compiler can type-check the
+    /// nested `if` chain in a smaller context (without the outer
+    /// ScrollView modifiers, the `messageRows(settledItems.suffix(...))`
+    /// call site can no longer exhaust the type-checker's budget).
+    ///
+    /// When at least one phase summary exists we render via
+    /// `chatWithPhases` which prepends each phase card to its
+    /// assistant message. Otherwise we fall back to plain
+    /// `messageRows` so older sessions without phase data still
+    /// work. The fold placeholder is identical in both paths.
+    @ViewBuilder
+    private func settledContent(summariesByMessageID: [UUID: PhaseSummary]) -> some View {
+        let foldThresh = max(0, windowState.foldThreshold)
+        let hiddenCount = max(0, settledItems.count - foldThresh)
+
+        if foldThresh > 0 && hiddenCount > 0 {
+            foldToggleButton(hiddenCount: hiddenCount)
+        }
+
+        if chatBridge.phaseSummaries.isEmpty {
+            if hiddenCount > 0 {
+                messageRows(Array(settledItems.suffix(foldThresh)))
+            } else {
+                messageRows(settledItems)
+            }
+        } else {
+            let totalPhases = chatBridge.phaseSummaries.count
+            let visibleEnd = min(foldThresh, 100)
+            let visibleStart = max(0, totalPhases - visibleEnd)
+            chatWithPhases(
+                visibleRange: visibleStart..<totalPhases,
+                phaseSummaries: chatBridge.phaseSummaries,
+                allSummariesByMessageID: summariesByMessageID,
+                allMessages: settledItems,
+                forceCollapse: chatBridge.collapseAllPhases
+            )
         }
     }
 
