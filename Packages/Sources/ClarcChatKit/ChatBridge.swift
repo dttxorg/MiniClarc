@@ -26,6 +26,12 @@ public final class ChatBridge {
     /// summary is generated on completion. Older entries are auto-collapsed
     /// in the UI by default; the user can expand any one to inspect.
     public var phaseSummaries: [PhaseSummary] = []
+    /// When true, every PhaseSummaryCard in the chat list is rendered
+    /// collapsed regardless of its own isExpanded state. This is a
+    /// per-window, transient UI state — toggled by a "collapse all" button
+    /// in the message toolbar. It does NOT mutate the per-card stored
+    /// isExpanded state. Reset to false when the window switches sessions.
+    public var collapseAllPhases: Bool = false
     public var streamingStartDate: Date?
     public var lastTurnContextUsedPercentage: Double?
     public var modelDisplayName: String = ""
