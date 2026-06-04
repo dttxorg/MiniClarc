@@ -165,9 +165,9 @@ struct MessageListView: View {
             HStack(spacing: 6) {
                 Group {
                     if isOlderCollapsed {
-                        Text(String(format: String(localized: "Show %lld earlier messages", bundle: .module), hiddenCount))
+                        Text(String(format: String(localized: "Show %lld earlier phases", bundle: .module), hiddenCount))
                     } else {
-                        Text("Collapse earlier messages", bundle: .module)
+                        Text("Collapse earlier phases", bundle: .module)
                     }
                 }
                 .font(.system(size: ClaudeTheme.size(12), weight: .medium))
@@ -213,7 +213,10 @@ struct MessageListView: View {
             }
         } else {
             let totalPhases = chatBridge.phaseSummaries.count
-            let visibleEnd = min(foldThresh, 100)
+            // foldThreshold == 0 means "Off" — the user explicitly
+            // opted out of folding and should see all phases
+            // (capped only by the virtualization limit).
+            let visibleEnd = foldThresh == 0 ? totalPhases : min(foldThresh, 100)
             let visibleStart = max(0, totalPhases - visibleEnd)
             chatWithPhases(
                 visibleRange: visibleStart..<totalPhases,
