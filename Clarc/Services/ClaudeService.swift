@@ -283,6 +283,52 @@ actor ClaudeService {
         }
     }
 
+    // MARK: - Compact Session
+
+    /// Run a one-shot context compaction: ask Claude to summarize the
+    /// conversation of an existing session. Returns the summary text
+    /// (which the caller is expected to insert as a fresh assistant
+    /// message in place of the old history).
+    ///
+    /// Implementation: spawn `claude -p "Summarize..." --resume <sid>
+    /// --system-prompt <summaryPrompt> --output-format text --model
+    /// <model>` and return the full stdout.
+    func compactSession(
+        sessionId: String,
+        model: String,
+        cwd: String?
+    ) async throws -> String {
+        guard let binary = await findClaudeBinary() else {
+            throw ClaudeError.binaryNotFound
+        }
+
+        let summaryPrompt = """
+        You are performing a CONTEXT CHECKPOINT COMPACTION for an existing \
+        Claude Code session. Produce a handoff summary that another LLM \
+        can use to resume the task.
+
+        Include:
+        1. Current progress and key decisions made.
+        2. Important context, constraints, and user preferences.
+        3. What remains to be done.
+        4. Any critical data, file paths, or tool outputs needed to continue.
+
+        Be concise. The summary will replace the conversation history.
+        """
+
+        let arguments = [
+            "-p",
+            "Summarize the conversation above this point.",
+            "--resume", sessionId,
+            "--system-prompt", summaryPrompt,
+            "--output-format", "text",
+            "--model", model
+        ]
+
+        let output = try await runShellCommand(binary, arguments: arguments, cwd: cwd)
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Version Check
 
     /// Run `claude --version` and return the version string.
