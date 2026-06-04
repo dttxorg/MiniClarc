@@ -11,16 +11,11 @@
 "How can I help you?" = "How can I help you?";
 "Thinking..." = "Thinking...";
 "Generating response..." = "Generating response...";
-"Phase: thinking" = "Phase: thinking";
-"Phase: text" = "Phase: text";
-"Phase: tool use" = "Phase: tool use";
-"Phase: tool result" = "Phase: tool result";
-
-// MARK: - Phase labels
-"Phase label: thinking" = "Thinking";
-"Phase label: text" = "Text";
-"Phase label: tool use" = "Tool: %@";
-"Phase label: tool result" = "Result";
+// MARK: - Turn folding
+"Show %lld earlier turns" = "Show %lld earlier turns";
+"Collapse earlier turns" = "Collapse earlier turns";
+"Expand all turns" = "Expand all turns";
+"Collapse all turns" = "Collapse all turns";
 
 // MARK: - Fold threshold
 "Fold older messages" = "Fold older messages";

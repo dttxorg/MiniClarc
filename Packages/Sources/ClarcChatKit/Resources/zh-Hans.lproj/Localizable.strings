@@ -11,16 +11,11 @@
 "How can I help you?" = "我能帮你做什么?";
 "Thinking..." = "思考中…";
 "Generating response..." = "正在生成回复…";
-"Phase: thinking" = "阶段:思考";
-"Phase: text" = "阶段:文本";
-"Phase: tool use" = "阶段:工具调用";
-"Phase: tool result" = "阶段:工具结果";
-
-// MARK: - Phase labels
-"Phase label: thinking" = "思考";
-"Phase label: text" = "文本";
-"Phase label: tool use" = "工具:%@";
-"Phase label: tool result" = "结果";
+// MARK: - Turn folding
+"Show %lld earlier turns" = "显示 %lld 条更早的对话轮次";
+"Collapse earlier turns" = "收起更早的对话轮次";
+"Expand all turns" = "展开所有对话轮次";
+"Collapse all turns" = "折叠所有对话轮次";
 
 // MARK: - Fold threshold
 "Fold older messages" = "折叠更早的消息";

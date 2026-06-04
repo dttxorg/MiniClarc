@@ -131,16 +131,11 @@
 "How can I help you?" = "무엇을 도와드릴까요?";
 "Thinking..." = "생각하는 중...";
 "Generating response..." = "응답 생성 중...";
-"Phase: thinking" = "단계: 생각";
-"Phase: text" = "단계: 텍스트";
-"Phase: tool use" = "단계: 도구 사용";
-"Phase: tool result" = "단계: 도구 결과";
-
-// MARK: - Phase labels
-"Phase label: thinking" = "생각";
-"Phase label: text" = "텍스트";
-"Phase label: tool use" = "도구: %@";
-"Phase label: tool result" = "결과";
+// MARK: - Turn folding
+"Show %lld earlier turns" = "%lld개 이전 대화 턴 보기";
+"Collapse earlier turns" = "이전 대화 턴 접기";
+"Expand all turns" = "모든 대화 턴 펴기";
+"Collapse all turns" = "모든 대화 턴 접기";
 
 // MARK: - Fold threshold
 "Fold older messages" = "이전 메시지 접기";
