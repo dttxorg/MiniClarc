@@ -2,11 +2,10 @@ import Foundation
 import ClarcCore
 
 /// One user turn plus the assistant blocks that follow before the
-/// next user turn. Owns its own collapsed state. The legacy
-/// `PhaseSummaryCard` was a similar idea but grouped by an implicit
-/// "phase" that didn't carry clear semantics. Turns are the minimum
-/// unit a user actually perceives as a conversation step, so each
-/// turn is independently collapsible.
+/// next user turn. Collapse state is owned by `MessageListView`,
+/// not by the `Turn` value itself, so that re-deriving the turn
+/// list (e.g. when a new user message arrives) can apply the
+/// "only the last turn expanded" baseline uniformly.
 struct Turn: Identifiable, Equatable {
     /// == `userMessage.id`, or a synthesized UUID for orphan turns
     /// (a turn that begins with an assistant message — e.g. the very
@@ -22,12 +21,9 @@ struct Turn: Identifiable, Equatable {
     /// for a user-only turn.
     var assistantMessages: [ChatMessage]
 
-    /// UI state. Defaults to true for past turns beyond the fold
-    /// threshold; false for the in-progress turn.
-    var isCollapsed: Bool
-
     /// True iff the most recent assistant block is still streaming.
-    /// Used to force-expand the last turn.
+    /// Used to force-expand the last turn even if the default rule
+    /// would collapse it.
     var isInProgress: Bool
 }
 
@@ -46,17 +42,17 @@ extension Turn {
     ///   blocks may include thinking / text / tool call sub-blocks).
     /// - If the list starts with an assistant message, that becomes
     ///   an orphan turn headed by a placeholder.
-    /// - The in-progress turn (last one with `isStreaming == true`
-    ///   on the tail assistant block, or `isStreamingLast == true`)
-    ///   is forced to expanded.
-    /// - Turns whose index is `>= foldThreshold` default to collapsed.
+    ///
+    /// Collapse state is **not** baked into the `Turn` value
+    /// itself. The `MessageListView` owns it. The static helper
+    /// only derives the structural grouping + streaming flag.
     ///
     /// - Parameters:
     ///   - items: settled messages in arrival order
     ///   - isStreamingLast: whether the tail block is currently
     ///     streaming
-    ///   - foldThreshold: 0 = never auto-collapse; N = collapse any
-    ///     turn at index >= N
+    ///   - foldThreshold: kept for API compatibility; ignored. The
+    ///     baseline rule is "only the last turn expanded".
     static func makeTurns(
         from items: [ChatMessage],
         isStreamingLast: Bool,
@@ -74,12 +70,10 @@ extension Turn {
             switch msg.role {
             case .user:
                 flushCurrent()
-                let collapsed = turns.count >= max(0, foldThreshold)
                 current = Turn(
                     id: msg.id,
                     userMessage: msg,
                     assistantMessages: [],
-                    isCollapsed: collapsed,
                     isInProgress: false
                 )
             case .assistant:
@@ -90,7 +84,6 @@ extension Turn {
                         id: UUID(),
                         userMessage: placeholder,
                         assistantMessages: [msg],
-                        isCollapsed: false,
                         isInProgress: msg.isStreaming
                     )
                 } else {
@@ -103,12 +96,11 @@ extension Turn {
         }
         flushCurrent()
 
-        // Force-expand the in-progress (last) turn.
-        if var last = turns.last, last.isInProgress || isStreamingLast {
-            last.isCollapsed = false
-            if !turns.isEmpty {
-                turns[turns.count - 1] = last
-            }
+        // Mark the last turn as in-progress when the caller told
+        // us the tail block is still streaming.
+        if isStreamingLast, var last = turns.last {
+            last.isInProgress = true
+            turns[turns.count - 1] = last
         }
         return turns
     }

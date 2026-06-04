@@ -18,6 +18,10 @@ struct MessageListView: View {
     @State private var isNearBottom = true
     @State private var isOlderCollapsed = true
     @State private var isSessionReady = false
+    /// Per-turn collapse override set by the user. `true` = user
+    /// collapsed the turn, `false` = user expanded the turn. Absent
+    /// = use the default "only the last turn expanded" baseline.
+    @State private var collapseOverrides: [UUID: Bool] = [:]
 
     /// Read fold threshold from the per-window mirror. 0 disables folding.
     private var foldThreshold: Int { windowState.foldThreshold }
@@ -164,41 +168,55 @@ struct MessageListView: View {
         .buttonStyle(.plain)
     }
 
-    /// Renders the fold placeholder + the settled turns. Each turn
-    /// is wrapped in a `TurnBlock` that knows how to render itself
-    /// collapsed or expanded.
+    /// Renders the turn list. Each turn is wrapped in a `TurnBlock`
+    /// that knows how to render itself collapsed or expanded.
+    /// The collapse state is computed per-turn: by default only
+    /// the last turn is expanded; user toggles are tracked in
+    /// `collapseOverrides`; `collapseAllTurns` is a session-wide
+    /// override.
     @ViewBuilder
     private func settledContent() -> some View {
-        let foldThresh = max(0, windowState.foldThreshold)
         let visible = makeVisibleTurns()
-        let hiddenCount = max(0, visible.count - foldThresh)
+        let lastId = visible.last?.id
 
         if let record = chatBridge.compactionRecord {
             CompactBanner(record: record)
         }
 
-        if foldThresh > 0 && hiddenCount > 0 && isOlderCollapsed {
-            foldToggleButton(hiddenCount: hiddenCount)
-        }
-
-        if hiddenCount > 0 && isOlderCollapsed {
-            ForEach(visible.suffix(foldThresh)) { turn in
-                TurnBlock(turn: turn, forceCollapsed: chatBridge.collapseAllTurns)
-                    .id(turn.id)
-            }
-        } else {
-            ForEach(visible) { turn in
-                TurnBlock(turn: turn, forceCollapsed: chatBridge.collapseAllTurns)
-                    .id(turn.id)
-            }
+        ForEach(visible) { turn in
+            TurnBlock(
+                turn: turn,
+                forceCollapsed: chatBridge.collapseAllTurns,
+                isCollapsed: isTurnCollapsed(turnId: turn.id, isLast: turn.id == lastId),
+                onToggle: { toggleCollapse(for: turn.id) }
+            )
+            .id(turn.id)
         }
     }
 
-    /// Build the turn list and apply the fold-threshold + virtualization cap.
-    /// If the session has been compacted, render the original
-    /// message snapshot from `compactionRecord` instead of the
-    /// live `settledItems` (which has been replaced with the
-    /// compacted list for CLI transmission).
+    /// True if the turn with the given id should render collapsed.
+    /// Baseline rule: only the last turn is expanded. The
+    /// `collapseOverrides` map lets the user flip individual turns;
+    /// `forceCollapsed` (the session-wide collapse-all toggle)
+    /// wins outright.
+    private func isTurnCollapsed(turnId: UUID, isLast: Bool) -> Bool {
+        if chatBridge.collapseAllTurns { return true }
+        if let override = collapseOverrides[turnId] { return override }
+        return !isLast
+    }
+
+    /// Toggle a turn's collapse state. Persists in `collapseOverrides`
+    /// so the choice sticks across `makeTurns` re-derivations.
+    private func toggleCollapse(for turnId: UUID) {
+        let current = collapseOverrides[turnId] ?? true
+        collapseOverrides[turnId] = !current
+    }
+
+    /// Build the turn list and apply the virtualization cap. If
+    /// the session has been compacted, render the original message
+    /// snapshot from `compactionRecord` instead of the live
+    /// `settledItems` (which has been replaced with the compacted
+    /// list for CLI transmission).
     private func makeVisibleTurns() -> [Turn] {
         let source: [ChatMessage] = chatBridge.compactionRecord?.originalMessages ?? settledItems
         let all = Turn.makeTurns(
@@ -206,7 +224,7 @@ struct MessageListView: View {
             isStreamingLast: chatBridge.isStreaming,
             foldThreshold: windowState.foldThreshold
         )
-        // Cap to foldThreshold + 100 visible (old phase-fold cap reused).
+        // Cap to foldThreshold + 100 visible (virtualization cap).
         let cap = max(0, windowState.foldThreshold) + 100
         if all.count <= cap { return all }
         return Array(all.suffix(cap))
@@ -416,27 +434,23 @@ private struct CompactBanner: View {
 /// preview (collapsed) or the full message bubbles (expanded). The
 /// collapsed preview never builds the bubble subtrees, so a long
 /// history with many collapsed turns stays cheap.
+///
+/// Collapse state is sourced from `MessageListView` (it owns the
+/// override map so the "only the last turn expanded" baseline can
+/// be re-applied when a new user message arrives).
 private struct TurnBlock: View {
     let turn: Turn
     let forceCollapsed: Bool
-
-    @State private var isCollapsedLocal: Bool
-
-    init(turn: Turn, forceCollapsed: Bool) {
-        self.turn = turn
-        self.forceCollapsed = forceCollapsed
-        _isCollapsedLocal = State(initialValue: turn.isCollapsed)
-    }
-
-    private var isCollapsed: Bool {
-        forceCollapsed || isCollapsedLocal
-    }
+    /// Final isCollapsed value, computed by the parent. Toggling
+    /// writes back to the parent's override map.
+    let isCollapsed: Bool
+    let onToggle: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) {
-                    isCollapsedLocal.toggle()
+                    onToggle()
                 }
             } label: {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
