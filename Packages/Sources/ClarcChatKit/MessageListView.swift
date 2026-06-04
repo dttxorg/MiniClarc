@@ -262,8 +262,19 @@ struct MessageListView: View {
     ) -> some View {
         ForEach(Array(phaseSummaries[visibleRange].enumerated()), id: \.element.id) { _, summary in
             let ownedMessageIDs = Set(summary.messageIDs)
-            if let ownedMessage = allMessages.first(where: { ownedMessageIDs.contains($0.id) }) {
-                PhaseSummaryCard(summary: summary, message: ownedMessage)
+            // Pull every message that belongs to this turn (typically
+            // [user prompt, ...assistant sub-messages, tool results])
+            // so the expanded card replays the full turn instead of a
+            // single (often incomplete) assistant message. Preserve
+            // streamingTail.messages's original order so the
+            // user-prompt-then-assistant-then-tool-result timeline is
+            // visible top-to-bottom.
+            let ownedMessages = allMessages
+                .enumerated()
+                .filter { ownedMessageIDs.contains($0.element.id) }
+                .map(\.element)
+            if !ownedMessages.isEmpty {
+                PhaseSummaryCard(summary: summary, messages: ownedMessages)
                     .id(summary.id)
                     .environment(\.phaseForceCollapse, forceCollapse)
             }
@@ -577,7 +588,7 @@ struct ElapsedTimeView: View {
 /// view stays clean.
 struct PhaseSummaryCard: View {
     let summary: PhaseSummary
-    let message: ChatMessage
+    let messages: [ChatMessage]
 
     @State private var isExpanded: Bool = false
     @State private var elapsed: Double = 0
@@ -739,8 +750,10 @@ struct PhaseSummaryCard: View {
                                 .fill(ClaudeTheme.surfaceElevated)
                         )
                     }
-                    MessageBubble(message: message)
-                        .id(message.id)
+                    ForEach(messages) { msg in
+                        MessageBubble(message: msg)
+                            .id(msg.id)
+                    }
                 }
                 .padding(.top, 4)
                 .padding(.leading, 11)  // align with header text (3 + 8)

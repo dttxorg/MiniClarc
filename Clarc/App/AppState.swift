@@ -1332,6 +1332,7 @@ final class AppState {
                         // the per-turn model.
                         let summary = Self.makePhaseSummary(
                             forMessage: state.streamingTail!.messages[survivingIdx],
+                            turnMessageIDs: state.streamingTail!.messages.map(\.id),
                             previousSummaries: state.phaseSummaries,
                             streamingStartDate: state.streamingStartDate
                         )
@@ -1358,6 +1359,7 @@ final class AppState {
     /// accumulator.
     private static func makePhaseSummary(
         forMessage message: ChatMessage,
+        turnMessageIDs: [UUID],
         previousSummaries: [PhaseSummary],
         streamingStartDate: Date?
     ) -> PhaseSummary {
@@ -1401,7 +1403,15 @@ final class AppState {
             readyForReview: readyForReview,
             changeSummary: changeSummary,
             suggestedNext: suggestedNext,
-            messageIDs: [message.id]
+            // Capture every message accumulated during this turn —
+            // typically [user prompt, ...assistant sub-messages with
+            // thinking/text/tool calls, tool results] — so that
+            // expanding the phase card replays the full turn instead
+            // of a single (often incomplete) assistant message. If
+            // `turnMessageIDs` is empty (e.g. stripNoOpText removed the
+            // surviving message), fall back to the surviving message's
+            // own id so the card is still anchored to something.
+            messageIDs: turnMessageIDs.isEmpty ? [message.id] : turnMessageIDs
         )
     }
 
