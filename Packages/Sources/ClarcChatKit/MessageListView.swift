@@ -172,6 +172,10 @@ struct MessageListView: View {
         let visible = makeVisibleTurns()
         let hiddenCount = max(0, visible.count - foldThresh)
 
+        if let record = chatBridge.compactionRecord {
+            CompactBanner(record: record)
+        }
+
         if foldThresh > 0 && hiddenCount > 0 && isOlderCollapsed {
             foldToggleButton(hiddenCount: hiddenCount)
         }
@@ -190,9 +194,14 @@ struct MessageListView: View {
     }
 
     /// Build the turn list and apply the fold-threshold + virtualization cap.
+    /// If the session has been compacted, render the original
+    /// message snapshot from `compactionRecord` instead of the
+    /// live `settledItems` (which has been replaced with the
+    /// compacted list for CLI transmission).
     private func makeVisibleTurns() -> [Turn] {
+        let source: [ChatMessage] = chatBridge.compactionRecord?.originalMessages ?? settledItems
         let all = Turn.makeTurns(
-            from: settledItems,
+            from: source,
             isStreamingLast: chatBridge.isStreaming,
             foldThreshold: windowState.foldThreshold
         )
@@ -330,6 +339,58 @@ fileprivate func groupMessages(_ messages: [ChatMessage], minGroupSize: Int = 2)
     flushAccumulator()
 
     return result
+}
+
+// MARK: - Compact Banner
+
+/// Banner shown above the turn list after a context compaction.
+/// Summarizes when the compact happened, how many messages /
+/// tokens were involved, and exposes a collapsible summary view.
+private struct CompactBanner: View {
+    let record: CompactionRecord
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(ClaudeTheme.textTertiary)
+                Text(String(format: String(localized: "Context compacted at %@", bundle: .module),
+                            record.compactedAt.formatted(date: .omitted, time: .shortened)))
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text(String(format: String(localized: "%lld messages · ~%lld → ~%lld tokens", bundle: .module),
+                            record.originalCount,
+                            record.originalTokenEstimate,
+                            record.newTokenEstimate))
+                    .font(.system(size: 11))
+                    .foregroundStyle(ClaudeTheme.textTertiary)
+                Button(isExpanded
+                       ? String(localized: "Hide summary", bundle: .module)
+                       : String(localized: "Show summary", bundle: .module)) {
+                    isExpanded.toggle()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Color.accentColor)
+            }
+            if isExpanded {
+                Text(record.summaryText)
+                    .font(.system(size: 12))
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(ClaudeTheme.surfacePrimary).opacity(0.5))
+                    )
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(ClaudeTheme.surfacePrimary).opacity(0.3))
+        )
+    }
 }
 
 // MARK: - Turn Block

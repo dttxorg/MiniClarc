@@ -26,6 +26,12 @@ public final class ChatBridge {
     /// message toolbar. It does NOT mutate per-turn stored state.
     /// Reset to false when the window switches sessions.
     public var collapseAllTurns: Bool = false
+    /// Non-nil after a context compaction. The original messages are
+    /// kept here so the UI can continue to show them, while
+    /// `messages` holds the compacted list that gets sent to the CLI
+    /// on the next turn. Pushed from `AppState` via
+    /// `SessionStreamState.compactionRecord`.
+    public var compactionRecord: CompactionRecord?
     public var streamingStartDate: Date?
     public var lastTurnContextUsedPercentage: Double?
     public var modelDisplayName: String = ""
