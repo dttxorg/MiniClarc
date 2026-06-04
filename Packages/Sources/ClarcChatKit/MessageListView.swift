@@ -45,57 +45,39 @@ struct MessageListView: View {
                     }
                 )
 
+                // The fold placeholder + message rows are rendered in
+                // BOTH paths. The placeholder appears whenever
+                // (settledItems.count - foldThreshold) > 0, independent
+                // of whether phase summaries exist.
+                let foldThresh = max(0, windowState.foldThreshold)
+                let hiddenCount = max(0, settledItems.count - foldThresh)
+
+                // 1. Fold placeholder (when threshold is exceeded)
+                if foldThresh > 0 && hiddenCount > 0 {
+                    foldToggleButton(hiddenCount: hiddenCount)
+                }
+
+                // 2. The actual content. Either the phase path (when
+                //    phase summaries exist) or the legacy messageRows
+                //    path.
                 if chatBridge.phaseSummaries.isEmpty {
-                    // Legacy fold-by-threshold rendering.
-                    // Fold older messages when count exceeds threshold.
-                    // (foldThreshold == 0 disables folding entirely — show everything.)
-                    if windowState.foldThreshold > 0 && settledItems.count > foldThreshold {
-                        let hiddenCount = settledItems.count - foldThreshold
-
-                        // Expanded state: show older messages
-                        if !isOlderCollapsed {
-                            messageRows(settledItems.prefix(hiddenCount))
-                        }
-
-                        // Fold toggle button
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                isOlderCollapsed.toggle()
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Group {
-                                    if isOlderCollapsed {
-                                        Text(String(format: String(localized: "Show %lld earlier messages", bundle: .module), hiddenCount))
-                                    } else {
-                                        Text("Collapse earlier messages", bundle: .module)
-                                    }
-                                }
-                                .font(.system(size: ClaudeTheme.size(12), weight: .medium))
-                                Image(systemName: isOlderCollapsed ? "chevron.down" : "chevron.up")
-                                    .font(.system(size: ClaudeTheme.size(10), weight: .medium))
-                            }
-                            .foregroundStyle(ClaudeTheme.textTertiary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: ClaudeTheme.cornerRadiusSmall)
-                                    .fill(ClaudeTheme.surfacePrimary.opacity(0.6))
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        messageRows(settledItems.suffix(foldThreshold))
+                    // Legacy: just message rows
+                    if hiddenCount > 0 {
+                        messageRows(settledItems.suffix(foldThresh))
                     } else {
                         messageRows(settledItems[...])
                     }
                 } else {
-                    // Codex-style: walk settledItems, prepending a phase
-                    // card to each phase-owned assistant message.
+                    // Phase path with virtualization cap at 100 phases
+                    let totalPhases = chatBridge.phaseSummaries.count
+                    let visibleEnd = min(foldThresh, 100)
+                    let visibleStart = max(0, totalPhases - visibleEnd)
                     chatWithPhases(
-                        messages: settledItems,
-                        phaseMessageIDs: phaseMessageIDs,
-                        summariesByMessageID: summariesByMessageID
+                        visibleRange: visibleStart..<totalPhases,
+                        phaseSummaries: chatBridge.phaseSummaries,
+                        allSummariesByMessageID: summariesByMessageID,
+                        allMessages: settledItems,
+                        forceCollapse: chatBridge.collapseAllPhases
                     )
                 }
             }
