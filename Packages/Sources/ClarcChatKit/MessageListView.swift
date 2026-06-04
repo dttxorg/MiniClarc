@@ -8,6 +8,22 @@ import SwiftUI
 import Combine
 import ClarcCore
 
+// MARK: - Phase Force-Collapse Environment
+
+private struct PhaseForceCollapseKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    /// When true, PhaseSummaryCard renders collapsed regardless of its
+    /// own isExpanded state. Set by MessageListView when the user has
+    /// activated the "collapse all phases" toggle.
+    var phaseForceCollapse: Bool {
+        get { self[PhaseForceCollapseKey.self] }
+        set { self[PhaseForceCollapseKey.self] = newValue }
+    }
+}
+
 /// Message scroll area — extracted from ChatView to isolate @Observable dependencies on `messages`.
 struct MessageListView: View {
     @Environment(ChatBridge.self) private var chatBridge
@@ -225,24 +241,28 @@ struct MessageListView: View {
         }
     }
 
-    /// Render settled messages interleaved with phase cards. Messages whose
-    /// id is in `phaseMessageIDs` are emitted as `MessageBubble`s *inside*
-    /// the corresponding `PhaseSummaryCard` (when expanded); they are
-    /// skipped from the top-level list to avoid duplication. User messages
-    /// and orphan (cancelled) assistant messages render as plain bubbles.
+    /// Render only phase-owned messages within `visibleRange`. The legacy
+    /// (non-phase) fallback path is responsible for orphan user / assistant
+    /// messages that are not part of any phase — `settledContent` calls the
+    /// legacy `messageRows(settledItems.suffix(foldThresh))` when phases are
+    /// empty, and that already covers the user prompts + non-phase assistants.
+    /// This helper exists to render just the cards for the *visible* slice
+    /// of phases, so a session with >100 phases doesn't inflate hundreds
+    /// of `MessageBubble`s into the VStack simultaneously.
     @ViewBuilder
     private func chatWithPhases(
-        messages: [ChatMessage],
-        phaseMessageIDs: Set<UUID>,
-        summariesByMessageID: [UUID: PhaseSummary]
+        visibleRange: Range<Int>,
+        phaseSummaries: [PhaseSummary],
+        allSummariesByMessageID: [UUID: PhaseSummary],
+        allMessages: [ChatMessage],
+        forceCollapse: Bool
     ) -> some View {
-        ForEach(Array(messages.enumerated()), id: \.element.id) { _, message in
-            if let summary = summariesByMessageID[message.id] {
-                PhaseSummaryCard(summary: summary, message: message)
+        ForEach(Array(phaseSummaries[visibleRange].enumerated()), id: \.element.id) { _, summary in
+            let ownedMessageIDs = Set(summary.messageIDs)
+            if let ownedMessage = allMessages.first(where: { ownedMessageIDs.contains($0.id) }) {
+                PhaseSummaryCard(summary: summary, message: ownedMessage)
                     .id(summary.id)
-            } else {
-                MessageBubble(message: message)
-                    .id(message.id)
+                    .environment(\.phaseForceCollapse, forceCollapse)
             }
         }
     }
@@ -558,6 +578,7 @@ struct PhaseSummaryCard: View {
 
     @State private var isExpanded: Bool = false
     @State private var elapsed: Double = 0
+    @Environment(\.phaseForceCollapse) private var phaseForceCollapse
 
     private let liveTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -684,7 +705,7 @@ struct PhaseSummaryCard: View {
             )
 
             // Expanded body — per-tool-call log + the assistant bubble.
-            if isExpanded {
+            if (isExpanded && !phaseForceCollapse) {
                 VStack(alignment: .leading, spacing: 8) {
                     if !summary.toolInvocations.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
