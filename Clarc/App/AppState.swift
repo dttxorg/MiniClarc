@@ -30,6 +30,12 @@ struct SessionStreamState {
     /// terminal transcript). Survives disk reloads — disk only owns committedMessages.
     var localAddendum: [ChatMessage] = []
 
+    /// Non-nil after a context compaction. The original messages are
+    /// kept here so the UI can continue to show them, while
+    /// `committedMessages` holds the compacted list that gets sent
+    /// to the CLI on the next turn.
+    var compactionRecord: CompactionRecord?
+
     /// The window that owns this session's stream. Set in
     /// `setupChatBridge` so streaming closures can read the per-window
     /// `taskProgressStore` (and any future per-window resources).
@@ -249,6 +255,13 @@ final class AppState {
     /// 0 disables folding entirely. Default is 8 (down from the legacy 30).
     var foldThreshold: Int = (UserDefaults.standard.object(forKey: "foldThreshold") as? Int) ?? 8 {
         didSet { UserDefaults.standard.set(foldThreshold, forKey: "foldThreshold") }
+    }
+
+    /// When the estimated token count of the current session's
+    /// settled messages exceeds this value, auto-trigger a context
+    /// compaction. 0 disables auto-compact. Default 100k (Codex-style).
+    var autoCompactThreshold: Int = (UserDefaults.standard.object(forKey: "autoCompactThreshold") as? Int) ?? 100_000 {
+        didSet { UserDefaults.standard.set(autoCompactThreshold, forKey: "autoCompactThreshold") }
     }
 
     /// When true, switching to a project cancels any background Claude
@@ -3149,6 +3162,34 @@ final class AppState {
             return parsed
         }
         return .default
+    }
+
+    // MARK: - Context Compaction
+
+    /// The compact service. Marked `@ObservationIgnored` because
+    /// `CompactService` holds its own state and doesn't need to
+    /// participate in SwiftUI observation. The lazy pattern avoids
+    /// capturing `self` during init.
+    @ObservationIgnored private var _compactService: CompactService?
+    var compactService: CompactService {
+        if let existing = _compactService { return existing }
+        let service = CompactService(appState: self)
+        _compactService = service
+        return service
+    }
+
+    /// Replace the current session's history with the compacted
+    /// version and store the original messages in
+    /// `compactionRecord`. The CLI will see the shorter history on
+    /// the next turn, while the UI continues to show the original
+    /// messages (read from the record).
+    func applyCompaction(_ record: CompactionRecord, newHistory: [ChatMessage], in window: WindowState) {
+        guard let sid = window.currentSessionId,
+              var session = sessionStates[sid] else { return }
+        session.committedMessages = newHistory
+        session.compactionRecord = record
+        session.streamingTail = nil
+        sessionStates[sid] = session
     }
 }
 
