@@ -137,6 +137,13 @@
 "Expand all turns" = "모든 대화 턴 펴기";
 "Collapse all turns" = "모든 대화 턴 접기";
 
+// MARK: - Context compaction
+"Context compacted at %@" = "%@ 에 컨텍스트 압축됨";
+"%lld messages · ~%lld → ~%lld tokens" = "%lld 개 메시지 · ~%lld → ~%lld 토큰";
+"Show summary" = "요약 보기";
+"Hide summary" = "요약 숨기기";
+"Compact context" = "컨텍스트 압축";
+
 // MARK: - Fold threshold
 "Fold older messages" = "이전 메시지 접기";
 "Fold threshold description" = "긴 대화 기록을 접어 최근 메시지만 표시합니다.";

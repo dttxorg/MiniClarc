@@ -17,6 +17,13 @@
 "Expand all turns" = "Expand all turns";
 "Collapse all turns" = "Collapse all turns";
 
+// MARK: - Context compaction
+"Context compacted at %@" = "Context compacted at %@";
+"%lld messages · ~%lld → ~%lld tokens" = "%lld messages · ~%lld → ~%lld tokens";
+"Show summary" = "Show summary";
+"Hide summary" = "Hide summary";
+"Compact context" = "Compact context";
+
 // MARK: - Fold threshold
 "Fold older messages" = "Fold older messages";
 "Fold threshold description" = "Collapse long chat histories to keep recent messages visible.";
