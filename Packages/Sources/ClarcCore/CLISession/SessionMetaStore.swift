@@ -57,7 +57,6 @@ public actor SessionMetaStore {
     }
 
     public func save(sessionId: String, meta: Meta) {
-        cache[sessionId] = meta
         let fm = FileManager.default
         var isDir: ObjCBool = false
         if !(fm.fileExists(atPath: baseURL.path, isDirectory: &isDir) && isDir.boolValue) {
@@ -71,7 +70,13 @@ public actor SessionMetaStore {
             try data.write(to: url, options: .atomic)
         } catch {
             logger.error("Failed to save session meta \(sessionId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
         }
+        // Only update the cache after a successful disk write. Otherwise
+        // a failed write (disk full, permissions) would leave the in-memory
+        // cache ahead of disk, and the next `load` after restart would
+        // return the stale on-disk value (e.g. pin title disappears).
+        cache[sessionId] = meta
     }
 
     public func delete(sessionId: String) {

@@ -4,6 +4,16 @@
 // Originally: Clarc (https://github.com/ttnear/Clarc), Apache License 2.0.
 // See ../../NOTICE in the repository root for the full modification history.
 
+// Localization convention (MiniClarc):
+//   - User-facing label that has a key in Localizable.strings:
+//       Text(LocalizedStringKey("Font Size"))          // explicit key lookup
+//   - String that must NOT be translated (URLs, computed numerics,
+//     command tokens copied verbatim into a command bar, etc.):
+//       Text(verbatim: "github.com/dttxorg/MiniClarc")
+//   - Never use bare Text("...") with a key — that treats the string
+//     as a literal and bypasses Localizable.strings, which is exactly
+//     the bug this file used to have (H-30).
+
 import SwiftUI
 import ClarcCore
 import ClarcChatKit
@@ -20,25 +30,25 @@ struct SettingsView: View {
         TabView(selection: $selectedTab) {
             GeneralSettingsTab(showUserManual: $showUserManual)
                 .tabItem {
-                    Label("通用", systemImage: "slider.horizontal.3")
+                    Label(LocalizedStringKey("General"), systemImage: "slider.horizontal.3")
                 }
                 .tag(0)
 
             ChatSettingsTab()
                 .tabItem {
-                    Label("聊天", systemImage: "bubble.left.and.bubble.right")
+                    Label(LocalizedStringKey("Chat"), systemImage: "bubble.left.and.bubble.right")
                 }
                 .tag(1)
 
             SlashCommandManagerView(isEmbedded: true)
                 .tabItem {
-                    Label("斜杠命令", systemImage: "terminal.fill")
+                    Label(LocalizedStringKey("Slash Commands"), systemImage: "terminal.fill")
                 }
                 .tag(2)
 
             ShortcutManagerView(isEmbedded: true)
                 .tabItem {
-                    Label("快捷按钮", systemImage: "bolt.fill")
+                    Label(LocalizedStringKey("Shortcut Buttons"), systemImage: "bolt.fill")
                 }
                 .tag(3)
         }
@@ -121,7 +131,7 @@ struct GeneralSettingsTab: View {
 
     private var fontSizeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("字体大小")
+            Text(LocalizedStringKey("Font Size"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
             fontSizeRow(
                 label: "Interface",
@@ -137,7 +147,7 @@ struct GeneralSettingsTab: View {
                 onIncrease: { appState.increaseMessageFontSize() },
                 onReset: { appState.messageFontSizeAdjustment = 0 }
             )
-            Text("font.size.hint")
+            Text(LocalizedStringKey("font.size.hint"))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
         }
@@ -153,7 +163,7 @@ struct GeneralSettingsTab: View {
                 .disabled(value <= ThemeStore.minFontSizeAdjustment)
             Group {
                 if value == 0 {
-                    Text("默认")
+                    Text(LocalizedStringKey("Default"))
                 } else {
                     Text(verbatim: value > 0 ? "+\(value)" : "\(value)")
                 }
@@ -427,7 +437,7 @@ struct GeneralSettingsTab: View {
 
     private var themeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("主题")
+            Text(LocalizedStringKey("Theme"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
             Button {
@@ -487,10 +497,10 @@ struct GeneralSettingsTab: View {
                     .font(.system(size: ClaudeTheme.size(14)))
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("技能市场")
+                    Text(LocalizedStringKey("Skill Marketplace"))
                         .font(.system(size: ClaudeTheme.size(13)))
                         .foregroundStyle(.primary)
-                    Text("浏览和管理 Claude Code 技能")
+                    Text(LocalizedStringKey("Browse and manage Claude Code skills"))
                         .font(.system(size: ClaudeTheme.size(11)))
                         .foregroundStyle(.secondary)
                 }
@@ -571,7 +581,7 @@ struct GeneralSettingsTab: View {
                 Image(systemName: "book.fill")
                     .font(.system(size: ClaudeTheme.size(14)))
                     .frame(width: 20)
-                Text("使用手册")
+                Text(LocalizedStringKey("User Manual"))
                     .font(.system(size: ClaudeTheme.size(13)))
                     .foregroundStyle(.primary)
                 Spacer()
@@ -624,10 +634,10 @@ struct ChatSettingsTab: View {
 
     private func modelSection(selectedModel: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("默认模型")
+            Text(LocalizedStringKey("Default Model"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("用于新会话。可在工具栏按会话单独覆盖。")
+            Text(LocalizedStringKey("Used for new sessions. You can override the model per session from the toolbar."))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
@@ -651,10 +661,10 @@ struct ChatSettingsTab: View {
     private var permissionModeSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("默认权限模式")
+            Text(LocalizedStringKey("Default Permission Mode"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("用于新会话。可在工具栏按会话单独覆盖。")
+            Text(LocalizedStringKey("Used for new sessions. You can override the permission mode per session from the toolbar."))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
@@ -678,15 +688,15 @@ struct ChatSettingsTab: View {
     private var effortSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("默认努力程度")
+            Text(LocalizedStringKey("Default Effort Level"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("用于新会话。可在工具栏按会话单独覆盖。")
+            Text(LocalizedStringKey("Used for new sessions. You can override the effort level per session from the toolbar."))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
             Picker("", selection: $appState.selectedEffort) {
-                Text("自动").tag("auto")
+                Text(LocalizedStringKey("Auto")).tag("auto")
                 ForEach(AppState.availableEfforts, id: \.self) { effort in
                     Text(effortDisplayName(effort)).tag(effort)
                 }
@@ -706,34 +716,34 @@ struct ChatSettingsTab: View {
     private var focusModeSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("专注模式")
+            Text(LocalizedStringKey("Focus Mode"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("focus.mode.desc")
+            Text(LocalizedStringKey("focus.mode.desc"))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
             Toggle(isOn: $appState.focusMode) {
-                Text("启用专注模式")
+                Text(LocalizedStringKey("Enable Focus Mode"))
             }
             .toggleStyle(.switch)
             .fixedSize()
         }
     }
 
-    // MARK: - 后台任务 Section
+    // MARK: - Background Task Section
 
     private var backgroundTaskSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("后台任务")
+            Text(LocalizedStringKey("Background Tasks"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
             Toggle(isOn: $appState.cancelBackgroundStreamsOnProjectSwitch) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("切换项目时取消其他项目后台的 Claude 流")
+                    Text(LocalizedStringKey("Cancel background Claude streams on project switch"))
                         .font(.system(size: ClaudeTheme.size(12)))
-                    Text("开启后,切到项目 B 会终止项目 A 后台仍在运行的 Claude 命令行进程,释放内存。关闭则保留现状(多任务并行)。")
+                    Text(LocalizedStringKey("When on, switching to project B terminates the Claude CLI process still running in the background for project A, freeing memory. When off, parallel streams are kept."))
                         .font(.system(size: ClaudeTheme.size(11)))
                         .foregroundStyle(.secondary)
                 }
@@ -747,14 +757,14 @@ struct ChatSettingsTab: View {
     private var foldThresholdSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("折叠较早消息")
+            Text(LocalizedStringKey("Fold older messages"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
             Picker(LocalizedStringKey("Fold older messages"), selection: $appState.foldThreshold) {
-                Text("Fold: 8").tag(8)
-                Text("Fold: 15").tag(15)
-                Text("Fold: 30").tag(30)
-                Text("Fold: Off").tag(0)
+                Text(LocalizedStringKey("fold.8")).tag(8)
+                Text(LocalizedStringKey("fold.15")).tag(15)
+                Text(LocalizedStringKey("fold.30")).tag(30)
+                Text(LocalizedStringKey("fold.off")).tag(0)
             }
             .pickerStyle(.menu)
             .fixedSize()
@@ -771,10 +781,10 @@ struct ChatSettingsTab: View {
     private var autoPreviewSection: some View {
         @Bindable var appState = appState
         return VStack(alignment: .leading, spacing: 12) {
-            Text("附件自动预览")
+            Text(LocalizedStringKey("Auto-preview Attachments"))
                 .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
 
-            Text("auto.preview.desc")
+            Text(LocalizedStringKey("auto.preview.desc"))
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 

@@ -35,6 +35,17 @@
 "Default" = "默认";
 "Reset" = "重置";
 "font.size.hint" = "分别调整界面与消息的字号。";
+"Background Tasks" = "后台任务";
+"Cancel background Claude streams on project switch" = "切换项目时取消其他项目后台的 Claude 流";
+"When on, switching to project B terminates the Claude CLI process still running in the background for project A, freeing memory. When off, parallel streams are kept." = "开启后,切到项目 B 会终止项目 A 后台仍在运行的 Claude 命令行进程,释放内存。关闭则保留现状(多任务并行)。";
+"Fold older messages" = "折叠较早消息";
+"fold.8" = "折叠:8";
+"fold.15" = "折叠:15";
+"fold.30" = "折叠:30";
+"fold.off" = "折叠:关闭";
+"Fold threshold description" = "将较早的对话回合折叠到摘要后面,最新回合保持展开。";
+"User Manual" = "使用手册";
+"Chat" = "聊天";
 "Notifications" = "通知";
 "Notify when response completes" = "回复完成时通知";
 "Sends a system notification while Clarc is in the background." = "Clarc 在后台时,发送系统通知。";

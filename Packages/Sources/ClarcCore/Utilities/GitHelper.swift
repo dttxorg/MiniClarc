@@ -12,14 +12,22 @@ public enum GitHelper {
             "PAGER": "",
         ]) { _, new in new }
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
         do {
             try process.run()
         } catch {
             return nil
+        }
+
+        // Drain stderr concurrently to prevent deadlock: macOS pipe buffer is
+        // 64KB by default, and if git writes more than that to stderr the child
+        // blocks on write(2) and the parent blocks on wait4.
+        let stderrDrainTask = Task.detached(priority: .userInitiated) {
+            _ = try? stderrPipe.fileHandleForReading.readToEnd()
         }
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -28,7 +36,8 @@ public enum GitHelper {
             }
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        stderrDrainTask.cancel()
         guard process.terminationStatus == 0 else { return nil }
         return String(data: data, encoding: .utf8)
     }

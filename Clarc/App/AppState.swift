@@ -765,6 +765,12 @@ final class AppState {
         // the same session id.
         allSessionSummaries = await mergedSummariesAcrossProjects()
 
+        // H-06: on restart, the in-memory `pendingPlaceholderIds` is empty,
+        // so any summary with a `pending-` prefix is an orphan left over
+        // from a previous launch's never-committed new chat. Drop it here
+        // so the sidebar doesn't show a "New Chat" row with no body.
+        allSessionSummaries.removeAll { $0.id.hasPrefix("pending-") }
+
         for project in projects {
             watchProjectDirectory(project)
         }
@@ -2300,6 +2306,31 @@ final class AppState {
             }
         }
 
+        // H-06: drop pending-<uuid> placeholders from allSessionSummaries and
+        // clear the window's tracking set before we filter sessionStates.
+        // Otherwise the sidebar keeps showing a "New Chat" that will never
+        // get committed. Placeholders are session-local to the previous
+        // project; switching project means the user gave up on them.
+        for id in window.pendingPlaceholderIds {
+            allSessionSummaries.removeAll { $0.id == id }
+            sessionStates.removeValue(forKey: id)
+            lastCommittedReloadKey.removeValue(forKey: id)
+            window.removePendingPlaceholder(id)
+        }
+
+        // Per-session mutable state (model / effort / permissionMode) must
+        // survive a project switch. H-03: the previous `filter { isStreaming }`
+        // dropped these from the in-memory `SessionStreamState`, so a user
+        // who ran `/model opus` on session X would lose that choice after
+        // switching projects and back. Persist the values to the sidecar
+        // `SessionMetaStore` before discarding the in-memory state, since
+        // `loadSummaries` already rehydrates them from there.
+        let toPersist: [(String, SessionStreamState)] = sessionStates
+            .filter { !$0.value.isStreaming }
+            .map { ($0.key, $0.value) }
+        let streamingKeys = Set(sessionStates.filter { $0.value.isStreaming }.keys)
+        let reloadKeysToPreserve = lastCommittedReloadKey.filter { streamingKeys.contains($0.key) }
+
         // animation: nil — all mutations land in the same frame; sessionStates.filter fires
         // one @Observable notification instead of N removeValue calls.
         withAnimation(nil) {
@@ -2308,6 +2339,28 @@ final class AppState {
             window.currentSessionId = nil
             startNewChat(in: window)
         }
+
+        // Persist the per-session overrides after the in-memory state is
+        // gone so the sidecar is authoritative on the next project switch.
+        if !toPersist.isEmpty {
+            let metaStore = self.metaStore
+            let snapshots = toPersist
+            Task.detached {
+                for (sid, state) in snapshots {
+                    // Read existing meta first so we don't clobber title / isPinned.
+                    var meta = await metaStore.load(sessionId: sid)
+                    if let m = state.model { meta.model = m }
+                    if let e = state.effort { meta.effort = e }
+                    if let p = state.permissionMode { meta.permissionMode = p }
+                    if meta.model != nil || meta.effort != nil || meta.permissionMode != nil {
+                        await metaStore.save(sessionId: sid, meta: meta)
+                    }
+                }
+            }
+        }
+        // Drop reload-cache keys for sessions we just evicted, keep the
+        // ones that survived (streaming sessions of other projects).
+        lastCommittedReloadKey = reloadKeysToPreserve
 
         UserDefaults.standard.set(project.id.uuidString, forKey: "selectedProjectId")
 
@@ -2684,6 +2737,17 @@ final class AppState {
         window.sessionModel = nil
         window.sessionEffort = nil
         window.sessionPermissionMode = nil
+        // H-06: when the user starts a new chat, any pending-<uuid> placeholder
+        // from a previous send() that never completed must be cleared from
+        // allSessionSummaries and the tracking set, or the sidebar retains a
+        // "New Chat" row with no body. Remove their per-session in-memory
+        // state too so we don't leak SessionStreamState entries.
+        for id in window.pendingPlaceholderIds {
+            allSessionSummaries.removeAll { $0.id == id }
+            sessionStates.removeValue(forKey: id)
+            lastCommittedReloadKey.removeValue(forKey: id)
+            window.removePendingPlaceholder(id)
+        }
         sessionStates.removeValue(forKey: window.newSessionKey)
         lastCommittedReloadKey.removeValue(forKey: window.newSessionKey)
         window.inputText = window.draftTexts["new"] ?? ""

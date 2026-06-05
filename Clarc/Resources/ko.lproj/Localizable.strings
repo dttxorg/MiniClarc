@@ -31,6 +31,17 @@
 "Default" = "기본값";
 "Reset" = "초기화";
 "font.size.hint" = "인터페이스와 메시지 폰트 크기를 각각 조절합니다.";
+"Background Tasks" = "Background Tasks";
+"Cancel background Claude streams on project switch" = "Cancel background Claude streams on project switch";
+"When on, switching to project B terminates the Claude CLI process still running in the background for project A, freeing memory. When off, parallel streams are kept." = "When on, switching to project B terminates the Claude CLI process still running in the background for project A, freeing memory. When off, parallel streams are kept.";
+"Fold older messages" = "Fold older messages";
+"fold.8" = "Fold: 8";
+"fold.15" = "Fold: 15";
+"fold.30" = "Fold: 30";
+"fold.off" = "Fold: Off";
+"Fold threshold description" = "Fold threshold description";
+"User Manual" = "User Manual";
+"Chat" = "Chat";
 "Notifications" = "알림";
 "Notify when response completes" = "응답 완료 시 알림";
 "Sends a system notification while Clarc is in the background." = "Clarc가 백그라운드에 있을 때 시스템 알림을 보냅니다.";

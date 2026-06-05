@@ -159,6 +159,8 @@ actor PermissionServer {
                     case .failed(let error):
                         logger.error("Listener failed: \(error.localizedDescription)")
                         l?.cancel()
+                    case .cancelled:
+                        l?.cancel()
                     default:
                         break
                     }
@@ -560,14 +562,20 @@ actor PermissionServer {
 
     // MARK: - Bash Allowlist Persistence
 
-    private static var bashAllowlistURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    private static func bashAllowlistURL() throws -> URL {
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw PermissionServerError.appSupportUnavailable
+        }
         return appSupport.appendingPathComponent("Clarc").appendingPathComponent("bash_allowlist.json")
     }
 
     private func loadBashAllowlistIfNeeded() async {
         guard bashCmdAllows == nil else { return }
-        let url = Self.bashAllowlistURL
+        guard let url = try? Self.bashAllowlistURL() else {
+            logger.error("Application Support directory unavailable; skipping Bash allowlist load")
+            bashCmdAllows = [:]
+            return
+        }
         guard let data = try? Data(contentsOf: url) else {
             bashCmdAllows = [:]
             return
@@ -592,7 +600,10 @@ actor PermissionServer {
 
     private func persistBashAllowlist() async {
         guard let snapshot = bashCmdAllows?.mapValues({ Array($0).sorted() }) else { return }
-        let url = Self.bashAllowlistURL
+        guard let url = try? Self.bashAllowlistURL() else {
+            logger.error("Application Support directory unavailable; skipping Bash allowlist persist")
+            return
+        }
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
@@ -819,12 +830,14 @@ enum PermissionServerError: LocalizedError {
     case noAvailablePort
     case connectionClosed
     case malformedRequest
+    case appSupportUnavailable
 
     var errorDescription: String? {
         switch self {
         case .noAvailablePort: return "No available port in range 19836–19846"
         case .connectionClosed: return "Connection closed unexpectedly"
         case .malformedRequest: return "Malformed HTTP request"
+        case .appSupportUnavailable: return "Application Support directory is unavailable (sandbox may be misconfigured)"
         }
     }
 }
