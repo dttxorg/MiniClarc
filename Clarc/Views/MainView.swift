@@ -154,7 +154,9 @@ struct MainView: View {
 
                 switch sidebarTab {
                 case .files:
-                    FileTreeView(projectPath: windowState.selectedProject!.path, searchTrigger: $fileSearchTrigger)
+                    if let project = windowState.selectedProject {
+                        FileTreeView(projectPath: project.path, searchTrigger: $fileSearchTrigger)
+                    }
                 case .history:
                     HistoryListView()
                 }

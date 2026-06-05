@@ -1873,6 +1873,11 @@ final class AppState {
         guard let data = raw.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
+        // The streaming tail may have been cleared by a cancel that
+        // raced with this for-await iteration. Bail out instead of
+        // force-unwrapping nil below.
+        if sessionStates[sessionKey]?.streamingTail == nil { return }
+
         let event: [String: Any]
         if let type = json["type"] as? String, type == "stream_event",
            let nested = json["event"] as? [String: Any] {

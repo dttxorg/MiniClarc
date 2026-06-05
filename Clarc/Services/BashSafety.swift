@@ -50,6 +50,9 @@ enum BashSafety {
         "branch", "tag", "stash", "cherry-pick", "revert", "am", "apply",
         "clean", "rm", "mv", "restore", "bisect", "pull", "fetch", "clone",
         "init", "submodule", "worktree", "gc", "prune", "filter-branch",
+        // write-side config / remote / ref / maintenance subcommands.
+        "config", "remote", "update-ref", "notes", "sparse-checkout",
+        "maintenance", "bundle", "replace",
     ]
 
     private nonisolated static let claudeMutatingSubcommands: Set<String> = [
@@ -72,8 +75,15 @@ enum BashSafety {
     /// When any of these appear in the command's argument list, the command is rejected.
     private nonisolated static let writeCapableFlags: [String: Set<String>] = [
         // `find` has multiple ways to mutate: -exec/-execdir/-ok/-okdir run
-        // arbitrary commands; -delete/-fls/-fprint write files.
-        "find": ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fls", "-fprint", "-fprintf", "-touch"],
+        // arbitrary commands; -delete/-fls/-fprint write files. Both
+        // short (`-x`) and long (`--xxx`) forms must be listed, since
+        // hasWriteCapableArg uses exact `flags.contains(arg)` matching.
+        "find": [
+            "-exec", "-execdir", "-ok", "-okdir",
+            "-delete", "-fls", "-fprint", "-fprintf", "-touch",
+            "--exec", "--execdir", "--ok", "--okdir",
+            "--delete", "--fls", "--fprint", "--fprintf", "--touch"
+        ],
         // `sort -o` writes to an arbitrary file. `--output` is the long form.
         "sort": ["-o", "--output"],
         // `python`/`python3`/`ruby`/`node` can execute arbitrary code via -c/-e/-p.
@@ -180,7 +190,21 @@ enum BashSafety {
         // the caller pass any binary as the next argument.
         guard safeCommands.contains(base) else { return false }
 
-        let subIdx = cmdIdx + 1
+        // Find the subcommand by skipping global flags. e.g.
+        //   git -C /repo push      → sub = "push"  (skip "-C", "/repo")
+        //   git --no-pager push    → sub = "push"  (skip "--no-pager")
+        //   git -c x=y clone       → sub = "clone" (skip "-c", "x=y")
+        // For commands that consume value-taking flags, this may still
+        // mis-parse (e.g. `git -c k=v` could see k=v as the sub if we
+        // didn't recognize -c as a value-flag). To be conservative we
+        // treat any token beginning with `-` as a flag and any subsequent
+        // non-flag token as the candidate sub.
+        var subIdx = cmdIdx + 1
+        while subIdx < parts.count {
+            let p = parts[subIdx]
+            if p.hasPrefix("-") { subIdx += 1; continue }
+            break
+        }
         let sub: String? = subIdx < parts.count ? parts[subIdx] : nil
         let argList = Array(parts.dropFirst(subIdx))
 

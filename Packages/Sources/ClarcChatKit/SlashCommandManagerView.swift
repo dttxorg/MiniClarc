@@ -548,7 +548,8 @@ struct SlashCommandEditView: View {
             HStack {
                 if isEditing && isDefault {
                     Button {
-                        if let original = SlashCommandRegistry.originalDefault(name: command!.name) {
+                        if let command,
+                           let original = SlashCommandRegistry.originalDefault(name: command.name) {
                             onSave(original)
                         }
                         dismiss()
