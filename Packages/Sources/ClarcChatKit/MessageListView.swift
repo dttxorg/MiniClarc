@@ -5,7 +5,6 @@
 // See ../../NOTICE in the repository root for the full modification history.
 
 import SwiftUI
-import Combine
 import ClarcCore
 
 /// Message scroll area — extracted from ChatView to isolate @Observable dependencies on `messages`.
@@ -668,7 +667,7 @@ struct StreamingIndicatorView: View {
 struct ElapsedTimeView: View {
     let startDate: Date
     @State private var elapsed: TimeInterval = 0
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var tickTask: Task<Void, Never>?
 
     var body: some View {
         Text(elapsed.formattedDuration)
@@ -676,9 +675,20 @@ struct ElapsedTimeView: View {
             .foregroundStyle(ClaudeTheme.textTertiary)
             .onAppear {
                 elapsed = Date().timeIntervalSince(startDate)
+                tickTask?.cancel()
+                tickTask = Task { [startDate] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(1))
+                        if Task.isCancelled { return }
+                        await MainActor.run {
+                            elapsed = Date().timeIntervalSince(startDate)
+                        }
+                    }
+                }
             }
-            .onReceive(timer) { _ in
-                elapsed = Date().timeIntervalSince(startDate)
+            .onDisappear {
+                tickTask?.cancel()
+                tickTask = nil
             }
     }
 }

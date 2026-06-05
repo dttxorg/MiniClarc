@@ -682,6 +682,18 @@ actor ClaudeService {
             }
             self.processes.removeValue(forKey: streamId)
             self.stdinHandles.removeValue(forKey: streamId)
+            // Close all pipe FDs so they don't leak on spawn failure. The
+            // normal path closes stdout via continuation.onTermination in
+            // send(); on the failure path that handler never fires because
+            // continuation.finish() was already called. Swallow close errors
+            // — we are already on the failure path and a secondary error
+            // here would mask the original spawn error.
+            try? stdinPipe.fileHandleForReading.close()
+            try? stdinPipe.fileHandleForWriting.close()
+            try? stdoutPipe.fileHandleForReading.close()
+            try? stdoutPipe.fileHandleForWriting.close()
+            try? stderrPipe.fileHandleForReading.close()
+            try? stderrPipe.fileHandleForWriting.close()
             throw ClaudeError.spawnFailed(error.localizedDescription)
         }
     }

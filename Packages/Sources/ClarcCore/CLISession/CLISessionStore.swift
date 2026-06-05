@@ -563,6 +563,74 @@ public actor CLISessionStore {
         )
     }
 
+    // MARK: - Compaction
+
+    /// Rewrite the session's jsonl with a compacted ChatMessage history. Each
+    /// message is emitted as a minimal CLI-format line (type+uuid+timestamp+
+    /// sessionId+message). The CLI's --resume picker only needs a valid jsonl
+    /// structure; a future turn will re-resolve the model and parent context.
+    /// Returns true on success, false if the file could not be written.
+    public func writeCompactedHistory(
+        sid: String,
+        cwd: String,
+        history: [ChatMessage]
+    ) async -> Bool {
+        let url = await jsonlURL(sid: sid, cwd: cwd)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var lines: [String] = []
+        lines.reserveCapacity(history.count)
+        for msg in history {
+            let ts = iso.string(from: msg.timestamp)
+            let uuid = msg.id.uuidString.lowercased()
+            let contentText = msg.content
+            let dict: [String: Any]
+            switch msg.role {
+            case .user:
+                dict = [
+                    "type": "user",
+                    "uuid": uuid,
+                    "parentUuid": NSNull(),
+                    "isSidechain": false,
+                    "userType": "external",
+                    "entrypoint": "sdk-cli",
+                    "gitBranch": "",
+                    "timestamp": ts,
+                    "sessionId": sid,
+                    "message": ["role": "user", "content": contentText]
+                ]
+            case .assistant:
+                dict = [
+                    "type": "assistant",
+                    "uuid": uuid,
+                    "parentUuid": NSNull(),
+                    "isSidechain": false,
+                    "userType": "external",
+                    "entrypoint": "sdk-cli",
+                    "gitBranch": "",
+                    "timestamp": ts,
+                    "sessionId": sid,
+                    "message": ["role": "assistant", "content": [["type": "text", "text": contentText]]]
+                ]
+            }
+            guard let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
+                  let str = String(data: data, encoding: .utf8) else {
+                logger.error("writeCompactedHistory: failed to serialize message \(uuid, privacy: .public)")
+                return false
+            }
+            lines.append(str)
+        }
+        let content = lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            logger.debug("Wrote compacted history for \(sid, privacy: .public) (\(lines.count, privacy: .public) lines)")
+            return true
+        } catch {
+            logger.error("writeCompactedHistory failed for \(sid, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
     // MARK: - Deletion
 
     /// Remove the CLI-owned jsonl for a session.

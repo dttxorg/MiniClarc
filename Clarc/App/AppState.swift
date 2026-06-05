@@ -3201,6 +3201,27 @@ final class AppState {
         session.compactionRecord = record
         session.streamingTail = nil
         sessionStates[sid] = session
+        // Persist the compacted history to the CLI jsonl and drop the
+        // reload cache so the next reloadCommittedFromDisk re-parses
+        // the new file (otherwise the on-disk full history would
+        // overwrite the in-memory compacted list).
+        let cwd: String? = {
+            guard let pid = window.selectedProject?.id else { return nil }
+            return projects.first(where: { $0.id == pid })?.path
+        }()
+        if let cwd {
+            Task {
+                let ok = await cliStore.writeCompactedHistory(sid: sid, cwd: cwd, history: newHistory)
+                if ok {
+                    await MainActor.run {
+                        lastCommittedReloadKey.removeValue(forKey: sid)
+                    }
+                }
+            }
+        } else {
+            // No cwd resolvable — still drop cache so in-memory state survives reload attempts.
+            lastCommittedReloadKey.removeValue(forKey: sid)
+        }
     }
 }
 

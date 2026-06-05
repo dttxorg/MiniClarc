@@ -40,6 +40,8 @@ private let kK: UInt16 = 40
 
 @Observable private final class MemoContext {
     weak var textView: MemoTextView?
+    var isShowingLinkAlert: Bool = false
+    var linkDraft: String = ""
 
     private func refocus() {
         guard let tv = textView else { return }
@@ -55,17 +57,15 @@ private let kK: UInt16 = 40
 
     func addLink() {
         guard let tv = textView else { return }
-        let alert = NSAlert()
-        alert.messageText = "Insert Link"
-        alert.addButton(withTitle: "Insert")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 22))
-        field.placeholderString = "https://"
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { tv.window?.makeFirstResponder(tv); return }
-        let raw = field.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !raw.isEmpty else { tv.window?.makeFirstResponder(tv); return }
+        tv.window?.makeFirstResponder(tv)
+        linkDraft = ""
+        isShowingLinkAlert = true
+    }
+
+    func confirmLinkInsertion() {
+        guard let tv = textView else { return }
+        let raw = linkDraft.trimmingCharacters(in: .whitespaces)
+        guard !raw.isEmpty else { return }
         let urlString = raw.hasPrefix("http://") || raw.hasPrefix("https://") ? raw : "https://\(raw)"
         tv.window?.makeFirstResponder(tv)
         tv.insertLink(urlString: urlString)
@@ -91,13 +91,18 @@ struct InspectorMemoPanel: View {
             MemoFormattingToolbar(context: memoContext)
         }
         .background(ClaudeTheme.background)
+        .alert("Insert Link", isPresented: Bindable(memoContext).isShowingLinkAlert) {
+            TextField("https://", text: Bindable(memoContext).linkDraft)
+            Button("Insert") { memoContext.confirmLinkInsertion() }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
 
 // MARK: - Formatting toolbar
 
 private struct MemoFormattingToolbar: View {
-    let context: MemoContext
+    @Bindable var context: MemoContext
 
     var body: some View {
         HStack(spacing: 0) {

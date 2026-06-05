@@ -5,6 +5,7 @@ import SwiftTerm
 // MARK: - TerminalProcess
 
 /// Reference type that manages the lifecycle of a terminal process.
+@MainActor
 final class TerminalProcess {
     var terminalView: LocalProcessTerminalView?
     private(set) var terminated = false

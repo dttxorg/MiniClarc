@@ -8,8 +8,7 @@ struct TaskUpdateCard: View {
     let update: TaskUpdateMessage
     @Binding var isExpanded: Bool
     @State private var now: Date = Date()
-
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var tickTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -30,8 +29,19 @@ struct TaskUpdateCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
-        .onReceive(ticker) { _ in
-            if update.status == .running { now = Date() }
+        .onAppear {
+            tickTask?.cancel()
+            tickTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    if Task.isCancelled { return }
+                    if update.status == .running { now = Date() }
+                }
+            }
+        }
+        .onDisappear {
+            tickTask?.cancel()
+            tickTask = nil
         }
         .contentShape(Rectangle())
         .onTapGesture {

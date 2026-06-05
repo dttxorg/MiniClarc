@@ -8,9 +8,8 @@ struct PermissionModal: View {
     let request: PermissionRequest
 
     @State private var remainingSeconds: Int
+    @State private var tickTask: Task<Void, Never>?
     @FocusState private var isFocused: Bool
-
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(request: PermissionRequest) {
         self.request = request
@@ -42,15 +41,24 @@ struct PermissionModal: View {
         .onAppear {
             isFocused = true
             remainingSeconds = appState.autoDenyTimeout.seconds
-        }
-        .onReceive(timer) { _ in
-            // No countdown when the user opted out of auto-deny entirely.
-            guard !appState.autoDenyTimeout.isUnlimited else { return }
-            if remainingSeconds > 0 {
-                remainingSeconds -= 1
-            } else {
-                Task { await appState.respondToPermission(request, decision: .deny, in: windowState) }
+            tickTask?.cancel()
+            tickTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    if Task.isCancelled { return }
+                    // No countdown when the user opted out of auto-deny entirely.
+                    guard !appState.autoDenyTimeout.isUnlimited else { continue }
+                    if remainingSeconds > 0 {
+                        remainingSeconds -= 1
+                    } else {
+                        await appState.respondToPermission(request, decision: .deny, in: windowState)
+                    }
+                }
             }
+        }
+        .onDisappear {
+            tickTask?.cancel()
+            tickTask = nil
         }
     }
 
