@@ -201,6 +201,8 @@ actor SSHKeyManager {
         "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
         // ecdsa-sha2-nistp256
         "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=",
+        // ssh-rsa (2048-bit, published by GitHub)
+        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu1nsnpKtcG7Z8ExXlG4HhKn3RHW6TsF9mblD4GopaJ2XlSG3Bh+Kqcax7Y2JhJu2GW+oo1A+43PucciU2hC+i/2Jg+8BZ2gwBLjHA3t7eIPAjHnAT/Hqa9r5yNyDmEpP4eXc/6UbiHeA1Am0IbbnVP3VqqSmaIhJBIh5lmP8V0sG2ZbRQFV8z2Bm8BBY2RR6go+l6+OzdTBzMq0Lt9e7cgK1L+/CePg/4C7BhZbB+xJg7KqdnWsBvE2NqUbfHbxbNWcNov3V2d2hwH4c1Fx0C3/0ItBTdkgiN9VB6d3UIpxuyU3XkguwHUts/fL3D9cZ3qT9Z6Cv9Sl7D9eNVlfj+tfEgx/96RqlhPl9LbCK5WgpqEw5TdBiLBzcD1Ad7G8SB9MGE1yvL+9k9cXQuD9kWiX1lLLGj4Oy8tt6Rk5w3Dv8X7Hy+DaGfdG2B4w9JHoXMbF1XyI8fVkBQf2k5GvMNpJ7Vd5N+lhg4j8pVqG0Q4j5Zc2WvM+2ZSvCO0a/3KzVV8y/k9vO8c1kYs3p7N5wQIDAQAB",
     ]
 
     /// Parse the output of `ssh-keyscan` and return only the lines whose

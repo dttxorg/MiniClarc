@@ -36,6 +36,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.sessionStates[sid]?.isStreaming = false
             appState.sessionStates[sid]?.activeStreamId = nil
         }
+        // Tear down subprocesses and the hook HTTP server. ClaudeService
+        // and PermissionServer are actors, so we hop onto each in a Task
+        // and wait on a semaphore — the runloop is winding down but
+        // synchronous work (Process.interrupt, listener.cancel, file
+        // removal) still runs before the process exits.
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            await appState.claude.cleanup()
+            await appState.permission.stop()
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + .milliseconds(250))
+    }
+
+    /// Called when the app loses active foreground focus (e.g. the user
+    /// hides Clarc, switches spaces, or it goes to the dock). We tear
+    /// down the hook HTTP server and child CLI processes here too —
+    /// background runs in a desktop CLI client are not expected, and
+    /// the server holds open hook files on disk that should not linger.
+    func sceneDidEnterBackground(_ notification: Notification) {
+        guard let appState else { return }
+        Task.detached {
+            await appState.permission.stop()
+            await appState.claude.cleanup()
+        }
     }
 }
 
@@ -53,11 +78,24 @@ struct ClarcApp: App {
     @State private var appState = AppState()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @FocusedValue(\.startNewChat) private var startNewChat
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             MainWindowRoot(appState: appState, appDelegate: appDelegate)
                 .focusable(false)
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .background {
+                        // App moved out of the foreground (user hid it,
+                        // switched spaces, etc.). Tear down the hook HTTP
+                        // server and child CLI processes — a desktop CLI
+                        // client should not keep them running invisibly.
+                        Task.detached {
+                            await appState.permission.stop()
+                            await appState.claude.cleanup()
+                        }
+                    }
+                }
         }
         .defaultSize(width: 1000, height: 700)
         .defaultLaunchBehavior(.presented)

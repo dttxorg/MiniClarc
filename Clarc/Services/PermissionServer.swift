@@ -568,14 +568,26 @@ actor PermissionServer {
     private func loadBashAllowlistIfNeeded() async {
         guard bashCmdAllows == nil else { return }
         let url = Self.bashAllowlistURL
-        guard let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+        guard let data = try? Data(contentsOf: url) else {
             bashCmdAllows = [:]
             return
         }
-        let loaded = decoded.mapValues(Set.init)
-        bashCmdAllows = loaded
-        logger.info("Loaded Bash allowlist for \(loaded.count) project(s)")
+        if let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) {
+            let loaded = decoded.mapValues(Set.init)
+            bashCmdAllows = loaded
+            logger.info("Loaded Bash allowlist for \(loaded.count) project(s)")
+        } else {
+            // Decode failure: preserve the corrupted file for inspection before clearing in-memory state.
+            let corruptedURL = url.deletingLastPathComponent()
+                .appendingPathComponent("bash_allowlist.corrupted-\(UUID().uuidString).json")
+            do {
+                try FileManager.default.moveItem(at: url, to: corruptedURL)
+                logger.error("Bash allowlist decode failed; moved corrupted file to \(corruptedURL.lastPathComponent)")
+            } catch {
+                logger.error("Bash allowlist decode failed and could not preserve file: \(error.localizedDescription)")
+            }
+            bashCmdAllows = [:]
+        }
     }
 
     private func persistBashAllowlist() async {

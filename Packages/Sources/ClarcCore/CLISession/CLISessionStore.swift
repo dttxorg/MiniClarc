@@ -13,6 +13,12 @@ public actor CLISessionStore {
     private static let cwdProbeLineLimit = 5
     private static let cwdIndexTTL: TimeInterval = 60
     private static let lastTimestampTailBytes: Int = 16 * 1024
+    /// Hard cap on sniffCache entries to bound long-running memory. The
+    /// per-project filter inside loadSummaries only prunes entries for the
+    /// project being listed, so a session deleted in project A while the user
+    /// is active in project B would otherwise leak forever. LRU-style eviction
+    /// on insert keeps hot entries hot.
+    private static let sniffCacheMaxEntries = 1000
 
     /// In-memory map: standardized cwd → CLI projects sub-directory URL. Built
     /// from real jsonl content (not from forward encoding), so it survives the
@@ -192,6 +198,17 @@ public actor CLISessionStore {
                 snippet = await sniffSummary(url: url)
                 snippet.lastTimestamp = lastTimestamp(in: url)
                 sniffCache[sid] = SniffCacheEntry(mtime: mtimeDate, result: snippet)
+                // Bound memory: drop the oldest entry(ies) if we crossed the cap.
+                // Filter on line 188 only catches sids in the current project;
+                // this catches everything else (other projects' deleted sids,
+                // any sid that's been displaced from this project since the
+                // last loadSummaries call). Dict insertion order is oldest-first.
+                if sniffCache.count > Self.sniffCacheMaxEntries {
+                    let overflow = sniffCache.count - Self.sniffCacheMaxEntries
+                    for key in sniffCache.keys.prefix(overflow) {
+                        sniffCache.removeValue(forKey: key)
+                    }
+                }
             }
             let title: String = {
                 if let t = meta.title, !t.isEmpty { return t }
@@ -445,6 +462,7 @@ public actor CLISessionStore {
         fromSid sid: String,
         cwd: String,
         atMessageTimestamp messageTimestamp: Date,
+        messageUUID: String? = nil,
         role: Role
     ) async -> String? {
         let originalURL = await jsonlURL(sid: sid, cwd: cwd)
@@ -466,22 +484,28 @@ public actor CLISessionStore {
             decoded[i] = try? decoder.decode(CLISessionLine.self, from: lineData)
         }
 
-        // Match the last line of the requested role whose timestamp == messageTimestamp.
-        // CLI emits sub-second precision timestamps, so collisions across visible turns
-        // are vanishingly rare.
+        // Match the last line of the requested role whose timestamp rounds (to 1ms)
+        // to the same value as messageTimestamp. If a uuid is supplied, prefer the
+        // line whose uuid matches exactly. This avoids ambiguity when the UI
+        // truncates timestamps to seconds or two CLI events share a millisecond.
+        let targetMillis = (messageTimestamp.timeIntervalSince1970 * 1000.0).rounded()
         var truncIndex: Int?
         for (i, line) in decoded.enumerated() {
             switch (line, role) {
             case (.user(let u)?, .user):
                 if u.isMeta || u.isSidechain { continue }
-                if let ts = u.timestamp, ts == messageTimestamp {
-                    truncIndex = i
-                }
+                guard let ts = u.timestamp else { continue }
+                let lineMillis = (ts.timeIntervalSince1970 * 1000.0).rounded()
+                guard lineMillis == targetMillis else { continue }
+                if let messageUUID, u.uuid != messageUUID { continue }
+                truncIndex = i
             case (.assistant(let a)?, .assistant):
                 if a.isSidechain { continue }
-                if let ts = a.timestamp, ts == messageTimestamp {
-                    truncIndex = i
-                }
+                guard let ts = a.timestamp else { continue }
+                let lineMillis = (ts.timeIntervalSince1970 * 1000.0).rounded()
+                guard lineMillis == targetMillis else { continue }
+                if let messageUUID, a.uuid != messageUUID { continue }
+                truncIndex = i
             default:
                 continue
             }
@@ -555,11 +579,18 @@ public actor CLISessionStore {
         }
     }
 
-    private static func rewriteSessionId(in line: String, to newSid: String) -> String {
-        line.replacingOccurrences(
+    private static func rewriteSessionId(in line: String, to newSID: String) -> String {
+        // Only rewrite the FIRST "sessionId" occurrence per line. The outer
+        // sessionId is what identifies the line; any later occurrence is
+        // almost always an embedded JSON blob (e.g. tool_result payload) that
+        // we must leave untouched.
+        guard let range = line.range(
             of: #""sessionId"\s*:\s*"[^"]*""#,
-            with: "\"sessionId\":\"\(newSid)\"",
             options: .regularExpression
+        ) else { return line }
+        return line.replacingCharacters(
+            in: range,
+            with: "\"sessionId\":\"\(newSID)\""
         )
     }
 

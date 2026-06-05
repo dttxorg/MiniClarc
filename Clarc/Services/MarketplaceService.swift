@@ -239,6 +239,10 @@ actor MarketplaceService {
 
         let box = ProcessBox()
 
+        // Resolve env BEFORE the sync continuation closure — that
+        // closure cannot `await`.
+        let env = await resolvedProcessEnvironment()
+
         return await withCheckedContinuation { (continuation: CheckedContinuation<(output: String, exitCode: Int32), Never>) in
             let stdoutPipe = box.stdoutPipe
             let stderrPipe = box.stderrPipe
@@ -249,11 +253,12 @@ actor MarketplaceService {
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
             // Inherit a safe subset of env; do not pass the parent env wholesale.
-            process.environment = [
-                "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
-                "HOME": ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(),
-                "LANG": ProcessInfo.processInfo.environment["LANG"] ?? "en_US.UTF-8",
-            ]
+            // PATH is built from the user's login shell + Homebrew + npm-global
+            // + nvm so a Homebrew-installed `claude` (typically in
+            // /opt/homebrew/bin) can be found. The GUI process's PATH alone
+            // is /usr/bin:/bin:... and would cause `env: claude` to fail
+            // with exit 127.
+            process.environment = env
 
             // IMPORTANT: keep a strong reference to `box` inside the closure
             // so the process isn't deallocated mid-run.
@@ -298,5 +303,102 @@ actor MarketplaceService {
             case .uninstallFailed(let name): return "Plugin uninstallation failed: \(name)"
             }
         }
+    }
+
+    // MARK: - Environment Resolution
+
+    /// Build a safe env dictionary for spawned `claude` CLI subprocesses.
+    ///
+    /// The GUI process's PATH is the launchd-set minimal PATH
+    /// (`/usr/bin:/bin:/usr/sbin:/sbin`), which does NOT include
+    /// `/opt/homebrew/bin` where Homebrew installs `claude`. Running
+    /// `env claude` with that PATH would fail with exit 127
+    /// ("env: claude: No such file or directory") and `MarketplaceError
+    /// .installFailed` would be thrown with the raw stderr dropped.
+    ///
+    /// We rebuild PATH from (1) the user's login shell `$PATH`
+    /// (captures `.zshrc`/nvm/asdf init), (2) well-known tool dirs
+    /// (Homebrew, npm-global, nvm fallback), and (3) the GUI PATH as
+    /// final fallback. Mirrors `ClaudeService.resolvedEnvironment()`.
+    private func resolvedProcessEnvironment() async -> [String: String] {
+        var paths: [String] = []
+        var seen = Set<String>()
+        func add(_ entry: String) {
+            let trimmed = entry.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { return }
+            paths.append(trimmed)
+        }
+
+        if let shellPath = await readUserShellPath() {
+            for component in shellPath.split(separator: ":") { add(String(component)) }
+        }
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for dir in [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "\(home)/.local/bin",
+            "\(home)/.npm-global/bin",
+        ] { add(dir) }
+
+        if let nvmBin = latestNvmBinDirectory(home: home) { add(nvmBin) }
+
+        if let existing = ProcessInfo.processInfo.environment["PATH"] {
+            for component in existing.split(separator: ":") { add(String(component)) }
+        }
+
+        return [
+            "PATH": paths.joined(separator: ":"),
+            "HOME": ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(),
+            "LANG": ProcessInfo.processInfo.environment["LANG"] ?? "en_US.UTF-8",
+        ]
+    }
+
+    /// Spawn the user's login shell once to read its `$PATH`.
+    /// Uses `-ilc` so `.zshrc` (and the nvm/asdf init it typically sources) runs.
+    private func readUserShellPath() async -> String? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            final class PathBox: @unchecked Sendable {
+                let process = Process()
+                let pipe = Pipe()
+            }
+            let box = PathBox()
+            box.process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            box.process.arguments = ["-ilc", "print -rn -- $PATH"]
+            box.process.standardOutput = box.pipe
+            // Inherit a PATH that at least lets `zsh` be found.
+            box.process.environment = [
+                "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+            ]
+            box.process.terminationHandler = { proc in
+                let data = box.pipe.fileHandleForReading.readDataToEndOfFile()
+                let str = String(data: data, encoding: .utf8) ?? ""
+                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                if proc.terminationStatus != 0 || trimmed.isEmpty {
+                    continuation.resume(returning: nil)
+                } else {
+                    continuation.resume(returning: trimmed)
+                }
+            }
+            do {
+                try box.process.run()
+            } catch {
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+
+    /// Locate the bin directory of the most recent nvm-installed Node, if any.
+    /// Defends against shell readout failure for nvm users.
+    private func latestNvmBinDirectory(home: String) -> String? {
+        let root = "\(home)/.nvm/versions/node"
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: root) else { return nil }
+        for entry in entries.sorted(by: >) {
+            let bin = "\(root)/\(entry)/bin"
+            if fm.isExecutableFile(atPath: "\(bin)/node") { return bin }
+        }
+        return nil
     }
 }

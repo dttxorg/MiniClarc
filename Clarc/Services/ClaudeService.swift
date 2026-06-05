@@ -23,6 +23,10 @@ actor ClaudeService {
     /// Writable stdin handles per stream — used for sending follow-up messages (e.g., AskUserQuestion responses).
     /// Entry is removed when stdin is closed (after `result` event or on cancel).
     private var stdinHandles: [UUID: FileHandle] = [:]
+    /// Pending "force-kill after 5 s" tasks, keyed by streamId. Cancelled when the
+    /// process exits naturally, so we never SIGKILL a recycled PID if the OS
+    /// reassigns the pid to an unrelated process.
+    private var cancelTasks: [UUID: Task<Void, Never>] = [:]
 
     /// Per-stream stderr accumulator — used to deliver error messages when process exits without a response
     private var stderrBuffers: [UUID: String] = [:]
@@ -493,20 +497,40 @@ actor ClaudeService {
     /// Terminate the process corresponding to a given streamId (SIGINT → SIGKILL after 5 seconds).
     func cancel(streamId: UUID) {
         guard let process = processes[streamId], process.isRunning else { return }
+        // Cancel any previously-scheduled kill (idempotency).
+        cancelTasks[streamId]?.cancel()
 
         logger.info("Sending SIGINT to claude process \(process.processIdentifier) (stream=\(streamId))")
         process.interrupt() // SIGINT
 
         // Schedule a forced kill after 5 seconds if still alive.
+        // The kill task is stored in `cancelTasks` and cancelled by the
+        // termination handler when the process exits, so we never SIGKILL a
+        // pid that the OS has already recycled for an unrelated process.
         let pid = process.processIdentifier
         let log = logger
-        Task {
+        let task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
-            if process.isRunning {
-                log.warning("Process \(pid) still running after 5 s, sending SIGKILL")
-                kill(pid, SIGKILL)
-            }
+            if Task.isCancelled { return }
+            await self?.forceKillIfStillOurs(streamId: streamId, pid: pid, log: log)
         }
+        cancelTasks[streamId] = task
+    }
+
+    /// SIGKILL `pid` only if the actor still owns the same running process
+    /// (guards against the OS recycling the pid after the original process
+    /// exited but before our 5 s timer fired).
+    private func forceKillIfStillOurs(streamId: UUID, pid: Int32, log: Logger) {
+        // Drop our handle to the kill task — it's either running now or done.
+        cancelTasks.removeValue(forKey: streamId)
+        guard let current = processes[streamId], current.isRunning,
+              current.processIdentifier == pid else {
+            // Process already exited (or the dictionary entry was replaced),
+            // so the pid may now belong to an unrelated process. Do nothing.
+            return
+        }
+        log.warning("Process \(pid) still running after 5 s, sending SIGKILL")
+        kill(pid, SIGKILL)
     }
 
     // MARK: - Private Helpers
@@ -722,6 +746,10 @@ actor ClaudeService {
 
     /// Remove a process from within actor isolation, called from terminationHandler.
     private func removeProcess(streamId: UUID) {
+        // Cancel any pending "force-kill after 5 s" task — the process is
+        // exiting (or has already exited), so we must not SIGKILL a pid that
+        // may have been recycled by the OS.
+        cancelTasks.removeValue(forKey: streamId)?.cancel()
         processes.removeValue(forKey: streamId)
         // If stdin is still open (e.g. abnormal exit before `result`), release the handle.
         if let handle = stdinHandles.removeValue(forKey: streamId) {
