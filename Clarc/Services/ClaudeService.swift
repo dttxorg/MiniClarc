@@ -265,6 +265,38 @@ actor ClaudeService {
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Produce a one-sentence summary of a single completed phase's
+    /// work. Uses the default model (no `--model haiku` downgrade)
+    /// per product decision — quality over token cost. The content
+    /// passed in is the phase's text + tool-call digest.
+    ///
+    /// This is a one-shot `claude -p` call (no `--resume`), so it
+    /// does not mutate session history.
+    func summarizePhase(content: String, cwd: String?) async throws -> String {
+        guard let binary = await findClaudeBinary() else {
+            throw ClaudeError.binaryNotFound
+        }
+        let prompt = """
+        Summarize the work below in ONE concise sentence (<= 20 words). \
+        Describe what was accomplished, not how. No preamble, no markdown, \
+        just the sentence.
+
+        ---
+        \(content)
+        """
+        let output = try await runShellCommand(
+            binary,
+            arguments: ["-p", prompt, "--output-format", "text"],
+            cwd: cwd
+        )
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Hard-cap to one line in case the model adds a trailing newline.
+        if let nl = trimmed.firstIndex(of: "\n") {
+            return String(trimmed[..<nl]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
     /// Run `/context` for a session and parse the used percentage.
     /// Returns nil if the session has no context info or parsing fails.
     func fetchContextPercentage(sessionId: String, cwd: String) async -> Double? {

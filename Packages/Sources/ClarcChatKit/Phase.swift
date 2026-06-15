@@ -17,46 +17,74 @@ import ClarcCore
 /// blocks every time the view re-evaluates and is never persisted.
 /// The canonical data lives in `ChatMessage.blocks` / the
 /// `taskUpdate` blocks themselves.
-struct Phase: Identifiable, Equatable {
+public struct Phase: Identifiable, Equatable {
     /// Stable identity derived from the closing task update id when
     /// available, otherwise from the first block id. Stability
     /// across re-derivations is what keeps SwiftUI `ForEach` (and
     /// the per-phase `@State` collapse flag) from resetting.
-    let id: String
+    public let id: String
 
     /// Heading shown in the phase header. From `taskUpdate.title`
     /// when the phase was closed by one, otherwise a fallback
     /// summary of the work it contains.
-    let title: String
+    public let title: String
 
     /// Optional one-line summary (taskUpdate.summary) shown next to
     /// the title. Empty for fallback phases.
-    let summary: String
+    public let summary: String
 
     /// Lifecycle state. `.running` for the open trailing phase while
     /// streaming, `.done`/`.failed` once a taskUpdate closes it.
-    let status: TaskUpdateStatus
+    public let status: TaskUpdateStatus
 
     /// Elapsed/final duration when a taskUpdate provided one.
-    let durationSeconds: TimeInterval?
+    public let durationSeconds: TimeInterval?
 
     /// The closing task update, if any. Used by the phase header to
     /// render status + files + tests via the existing
     /// `TaskUpdateCard`.
-    let taskUpdate: TaskUpdateMessage?
+    public let taskUpdate: TaskUpdateMessage?
 
     /// Blocks that belong to this phase (thinking, tool calls,
     /// text). In arrival order.
-    let blocks: [MessageBlock]
+    public let blocks: [MessageBlock]
 
     /// True for the open trailing phase while the turn is streaming.
-    let isInProgress: Bool
+    public let isInProgress: Bool
 
     /// A short, human label for the kind of work a fallback phase
     /// did — used when there is no taskUpdate title. Returns a count
     /// of tool calls plus the first text line if any.
-    var fallbackSubtitle: String {
+    public var fallbackSubtitle: String {
         Self.subtitleForFallback(blocks: blocks)
+    }
+
+    /// Plain-text digest of this phase's work, fed to the LLM when
+    /// generating a one-sentence summary. Includes tool names + a
+    /// trimmed view of their inputs/results and any assistant text,
+    /// capped so we don't blow the prompt on huge tool outputs.
+    public var digestForSummary: String {
+        var lines: [String] = []
+        for block in blocks {
+            if let text = block.text, !text.isEmpty {
+                lines.append("text: " + String(text.prefix(400)))
+            } else if let tool = block.toolCall {
+                let inputDigest = String((tool.input.values.compactMap { value -> String? in
+                    switch value {
+                    case .string(let s): return String(s.prefix(200))
+                    default: return nil
+                    }
+                }).joined(separator: " ").prefix(300))
+                var line = "tool: \(tool.name)"
+                if !inputDigest.isEmpty { line += " (\(inputDigest))" }
+                if let result = tool.result { line += " → " + String(result.prefix(200)) }
+                if tool.isError { line += " [error]" }
+                lines.append(line)
+            } else if let thinking = block.thinking, !thinking.isEmpty {
+                lines.append("thinking: " + String(thinking.prefix(200)))
+            }
+        }
+        return lines.isEmpty ? "(no content)" : lines.joined(separator: "\n")
     }
 }
 
@@ -75,7 +103,7 @@ private extension Phase {
     }
 }
 
-extension Phase {
+public extension Phase {
     /// Derive the phase list from a turn's blocks.
     ///
     /// Boundary rule: a `taskUpdate` block **closes** the current

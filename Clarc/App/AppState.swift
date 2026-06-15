@@ -874,6 +874,7 @@ final class AppState {
             )
         }
         bridge.taskProgressStore = window.taskProgressStore
+        bridge.phaseSummaryStore = window.phaseSummaryStore
 
         startBridgeObservation(bridge, for: window)
     }
@@ -894,6 +895,37 @@ final class AppState {
                 bridge.streamingStartDate = state.streamingStartDate
                 bridge.lastTurnContextUsedPercentage = state.lastTurnContextUsedPercentage
                 bridge.modelDisplayName = modelDisplayName(for: window.sessionModel ?? selectedModel, in: window)
+
+                // Live streaming-progress signals for the heartbeat
+                // indicator. Derived from the streaming tail each time
+                // observation fires, so they track the CLI's delta
+                // cadence. `streamingTick` is the forcing function that
+                // makes the indicator re-evaluate even when the other
+                // derived values happen to be unchanged in a given
+                // frame (e.g. while waiting on a tool result).
+                let tail = state.streamingTail
+                let activeToolName: String? = {
+                    guard let toolId = tail?.activeToolId, let msgs = tail?.messages else { return nil }
+                    for msg in msgs {
+                        if let block = msg.blocks.first(where: { $0.id == toolId }), let call = block.toolCall {
+                            return call.name
+                        }
+                    }
+                    return nil
+                }()
+                let outputChars = (tail?.textDeltaBuffer.count ?? 0)
+                    + (tail?.messages.last(where: { $0.isStreaming })?.blocks.compactMap(\.text).reduce(0) { $0 + $1.count } ?? 0)
+                let toolsExecuted = tail?.messages.flatMap(\.blocks).filter { $0.isToolCall && $0.toolCall?.result != nil }.count ?? 0
+                let thinkingSeconds: TimeInterval = {
+                    if let start = tail?.thinkingStartDate { return Date().timeIntervalSince(start) }
+                    return 0
+                }()
+                bridge.activeToolName = activeToolName
+                bridge.streamingOutputChars = outputChars
+                bridge.streamingToolsExecuted = toolsExecuted
+                bridge.streamingThinkingSeconds = thinkingSeconds
+                bridge.streamingTick &+= 1
+
                 bridge.sessionStats = ChatSessionStats(
                     costUsd: state.costUsd,
                     inputTokens: state.inputTokens,
@@ -1639,6 +1671,17 @@ final class AppState {
                                 updateState(key) { $0.lastTurnContextUsedPercentage = pct }
                             }
                         }
+
+                        // Per-phase LLM summaries: for each completed
+                        // phase that doesn't have a summary yet, ask
+                        // the model for a one-sentence recap and store
+                        // it so the phase header / collapsed-turn view
+                        // can show what was accomplished. Skips phases
+                        // that already have a title from their closing
+                        // taskUpdate only when that title is already a
+                        // real sentence — to keep behaviour simple we
+                        // summarise every closed phase regardless.
+                        summarizeCompletedPhases(sessionKey: key, in: window, cwd: cwdCapture)
 
                         if notificationsEnabled && !NSApp.isActive {
                             let title = allSessionSummaries.first(where: { $0.id == resultEvent.sessionId })?.title ?? "New Session"
@@ -3229,6 +3272,56 @@ final class AppState {
             return parsed
         }
         return .default
+    }
+
+    // MARK: - Phase Summaries
+
+    /// After a turn finishes, generate a one-sentence LLM summary for
+    /// each completed phase that doesn't already have one. Runs fully
+    /// in the background — failures are non-fatal (the phase header
+    /// just falls back to its existing title/subtitle).
+    ///
+    /// Uses the default model (no `--model haiku` downgrade) per
+    /// product decision: quality over token cost.
+    private func summarizeCompletedPhases(sessionKey: String, in window: WindowState, cwd: String?) {
+        let store = window.phaseSummaryStore
+        let state = sessionStates[sessionKey]
+        // Only the assistant messages carry phase-able blocks; the
+        // user prompt does not form phases. Flatten all assistant
+        // messages of the turn into one block stream so phase
+        // boundaries line up with what the UI renders.
+        let assistantBlocks = state?.allMessages.flatMap { msg -> [MessageBlock] in
+            msg.role == .assistant ? msg.blocks : []
+        } ?? []
+        let phases = Phase.makePhases(from: assistantBlocks, isStreamingLast: false)
+        let toSummarize = phases.filter { phase in
+            phase.status == .done
+                && store.summary(for: phase.id) == nil
+                && !store.isPending(phase.id)
+                && !store.hasFailed(phase.id)
+        }
+        guard !toSummarize.isEmpty else { return }
+        for phase in toSummarize {
+            store.markPending(phase.id)
+        }
+        let claudeRef = self.claude
+        let digestPairs = toSummarize.map { ($0.id, $0.digestForSummary) }
+        Task { [weak self] in
+            guard let self else { return }
+            for (phaseId, digest) in digestPairs {
+                do {
+                    let summary = try await claudeRef.summarizePhase(content: digest, cwd: cwd)
+                    let trimmed = summary.isEmpty ? nil : summary
+                    if let trimmed {
+                        await MainActor.run { store.setSummary(trimmed, for: phaseId) }
+                    } else {
+                        await MainActor.run { store.markFailed(phaseId) }
+                    }
+                } catch {
+                    await MainActor.run { store.markFailed(phaseId) }
+                }
+            }
+        }
     }
 
     // MARK: - Context Compaction

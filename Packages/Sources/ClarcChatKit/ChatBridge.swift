@@ -20,6 +20,21 @@ public final class ChatBridge {
     public var messages: [ChatMessage] = []
     public var isStreaming: Bool = false
     public var isThinking: Bool = false
+    /// Live streaming-progress signals used by the streaming
+    /// indicator to prove the agent is still working (instead of
+    /// looking frozen during long silent gaps). All derived from
+    /// `StreamingTail` / `SessionStreamState` and pushed by
+    /// `AppState.startBridgeObservation`.
+    //
+    // `streamingTick` is bumped on every observed change so SwiftUI
+    // views that read it re-evaluate at the same cadence the CLI
+    // pushes deltas — this is what makes the live counter "tick"
+    // like Codex's token count.
+    public var activeToolName: String? = nil
+    public var streamingOutputChars: Int = 0
+    public var streamingToolsExecuted: Int = 0
+    public var streamingThinkingSeconds: TimeInterval = 0
+    public var streamingTick: Int = 0
     /// When true, every Turn in the chat list is rendered collapsed
     /// regardless of its own `isCollapsed` state. This is a per-window,
     /// transient UI state — toggled by a "collapse all" button in the
@@ -42,6 +57,10 @@ public final class ChatBridge {
     public var sessionStats: ChatSessionStats = ChatSessionStats()
     public var autoPreviewSettings: AttachmentAutoPreviewSettings = AttachmentAutoPreviewSettings()
     public weak var taskProgressStore: TaskProgressStore?
+    /// LLM-generated one-sentence summaries for completed phases,
+    /// used by `PhaseBlock` / `PhaseTitleRow`. Weak because the
+    /// store is owned by `WindowState`.
+    public weak var phaseSummaryStore: PhaseSummaryStore?
 
     // MARK: - Action Handlers (set up by the app target)
 

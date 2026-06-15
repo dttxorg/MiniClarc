@@ -11,6 +11,12 @@
 "How can I help you?" = "How can I help you?";
 "Thinking..." = "Thinking...";
 "Generating response..." = "Generating response...";
+"Waiting..." = "Waiting...";
+"Running " = "Running ";
+"…" = "…";
+"%lld tools run" = "%lld tools run";
+"%lld chars" = "%lld chars";
+"%.1fs thinking" = "%.1fs thinking";
 // MARK: - Turn folding
 "Expand all turns" = "Expand all turns";
 "Collapse all turns" = "Collapse all turns";

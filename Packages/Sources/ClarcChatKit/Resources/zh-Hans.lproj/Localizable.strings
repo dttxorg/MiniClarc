@@ -11,6 +11,12 @@
 "How can I help you?" = "我能帮你做什么?";
 "Thinking..." = "思考中…";
 "Generating response..." = "正在生成回复…";
+"Waiting..." = "等待中…";
+"Running " = "运行中 ";
+"…" = "…";
+"%lld tools run" = "已运行 %lld 个工具";
+"%lld chars" = "%lld 字符";
+"%.1fs thinking" = "思考 %.1fs";
 // MARK: - Turn folding
 "Expand all turns" = "展开所有对话轮次";
 "Collapse all turns" = "折叠所有对话轮次";

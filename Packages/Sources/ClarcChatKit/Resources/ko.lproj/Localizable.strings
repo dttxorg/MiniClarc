@@ -131,6 +131,12 @@
 "How can I help you?" = "무엇을 도와드릴까요?";
 "Thinking..." = "생각하는 중...";
 "Generating response..." = "응답 생성 중...";
+"Waiting..." = "대기 중...";
+"Running " = "실행 중 ";
+"…" = "…";
+"%lld tools run" = "%lld개 도구 실행";
+"%lld chars" = "%lld자";
+"%.1fs thinking" = "%.1fs 생각";
 // MARK: - Turn folding
 "Expand all turns" = "모든 대화 턴 펴기";
 "Collapse all turns" = "모든 대화 턴 접기";

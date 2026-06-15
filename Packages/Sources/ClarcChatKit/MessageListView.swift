@@ -49,7 +49,6 @@ struct MessageListView: View {
                 if chatBridge.isStreaming {
                     HStack(alignment: .top, spacing: 0) {
                         StreamingIndicatorView(
-                            isThinking: chatBridge.isThinking,
                             startDate: chatBridge.streamingStartDate
                         )
                         Spacer(minLength: 40)
@@ -508,13 +507,22 @@ private struct TurnBlock: View {
 /// `TurnBlock`. Mirrors the visual language of the expanded
 /// `PhaseBlock` header so the two states read consistently.
 private struct PhaseTitleRow: View {
+    @Environment(ChatBridge.self) private var chatBridge
     let phase: Phase
+
+    private var displaySummary: String? {
+        chatBridge.phaseSummaryStore?.summary(for: phase.id)
+    }
 
     var body: some View {
         HStack(spacing: 6) {
             phaseStatusIcon
                 .frame(width: 12, height: 12)
-            Text(phase.title)
+            // Prefer the LLM-generated one-sentence summary when
+            // available (it is more descriptive than the fallback
+            // "N tools · first-line" title); otherwise show the
+            // derived title.
+            Text(displaySummary ?? phase.title)
                 .font(.system(size: 12))
                 .foregroundStyle(ClaudeTheme.textSecondary)
                 .lineLimit(1)
@@ -552,6 +560,7 @@ private struct PhaseTitleRow: View {
 /// Expanding reveals the phase's message bubbles (thinking, tool
 /// calls, text).
 private struct PhaseBlock: View {
+    @Environment(ChatBridge.self) private var chatBridge
     let phase: Phase
     @State private var isExpanded: Bool
 
@@ -597,7 +606,9 @@ private struct PhaseBlock: View {
         } label: {
             HStack(alignment: .center, spacing: 8) {
                 statusIcon.frame(width: 14, height: 14)
-                Text(phase.title)
+                // Title: prefer the LLM-generated one-sentence summary
+                // (most descriptive), else the derived title.
+                Text(chatBridge.phaseSummaryStore?.summary(for: phase.id) ?? phase.title)
                     .font(.system(size: ClaudeTheme.messageSize(13), weight: .semibold))
                     .foregroundStyle(ClaudeTheme.textPrimary)
                     .lineLimit(1)
@@ -792,24 +803,51 @@ struct EmptySessionView: View {
 
 // MARK: - Streaming Indicator
 
+/// Live "the agent is working" indicator. Shows a context-aware
+/// label (thinking / running a tool / generating text / waiting)
+/// plus a ticking counter so the user can see the agent is alive
+/// during long silent gaps — the same reassurance Codex's
+/// incrementing token count gives.
 struct StreamingIndicatorView: View {
-    let isThinking: Bool
+    @Environment(ChatBridge.self) private var chatBridge
     var startDate: Date?
+
+    /// Ticked locally at ~4Hz so the counter visibly changes even
+    /// between CLI deltas (e.g. while a tool is executing). The
+    /// underlying values come from `chatBridge`.
+    @State private var heartbeat: Int = 0
+    @State private var heartbeatTask: Task<Void, Never>?
+
+    /// Resolve what the agent is doing right now, in priority order.
+    private var activity: Activity {
+        let bridge = chatBridge
+        if bridge.isThinking {
+            return .thinking(seconds: bridge.streamingThinkingSeconds)
+        }
+        if let tool = bridge.activeToolName {
+            return .runningTool(name: tool, executedCount: bridge.streamingToolsExecuted)
+        }
+        // Has produced text deltas this turn → actively generating.
+        if bridge.streamingOutputChars > 0 {
+            return .generating(chars: bridge.streamingOutputChars)
+        }
+        return .waiting(executedCount: bridge.streamingToolsExecuted)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             PulseRingView()
                 .id("pulse")
 
-            Group {
-                if isThinking {
-                    Text("Thinking...", bundle: .module)
-                } else {
-                    Text("Generating response...", bundle: .module)
-                }
-            }
-            .font(.system(size: ClaudeTheme.size(13)))
-            .foregroundStyle(ClaudeTheme.textSecondary)
+            activityLabel
+                .font(.system(size: ClaudeTheme.size(13)))
+                .foregroundStyle(ClaudeTheme.textSecondary)
+
+            // Live counter — the bit that "ticks" like Codex's token count.
+            counterText
+                .font(.system(size: ClaudeTheme.size(12), design: .monospaced).monospacedDigit())
+                .foregroundStyle(ClaudeTheme.textTertiary)
+                .monospacedDigit()
 
             Spacer()
 
@@ -821,6 +859,70 @@ struct StreamingIndicatorView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(ClaudeTheme.surfacePrimary, in: RoundedRectangle(cornerRadius: ClaudeTheme.cornerRadiusMedium))
+        .onAppear {
+            heartbeatTask?.cancel()
+            heartbeatTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    if Task.isCancelled { return }
+                    heartbeat &+= 1
+                }
+            }
+        }
+        .onDisappear {
+            heartbeatTask?.cancel()
+            heartbeatTask = nil
+        }
+    }
+
+    /// Label depends on the current activity. `_ = heartbeat` so
+    /// SwiftUI re-evaluates this view on every tick.
+    @ViewBuilder
+    private var activityLabel: some View {
+        let _ = heartbeat
+        switch activity {
+        case .thinking:
+            Text("Thinking...", bundle: .module)
+        case .runningTool(let name, _):
+            // e.g. "Running Edit..." — localise the verb, keep the
+            // tool name verbatim (it is a CLI tool identifier).
+            (Text("Running ", bundle: .module) + Text(verbatim: name) + Text("…", bundle: .module))
+        case .generating:
+            Text("Generating response...", bundle: .module)
+        case .waiting:
+            Text("Waiting...", bundle: .module)
+        }
+    }
+
+    /// The numeric counter that ticks each frame.
+    @ViewBuilder
+    private var counterText: some View {
+        let _ = heartbeat
+        switch activity {
+        case .thinking(let seconds):
+            Text(String(format: String(localized: "%.1fs thinking", bundle: .module), seconds))
+        case .runningTool(_, let executed):
+            if executed > 0 {
+                Text(String(format: String(localized: "%lld tools run", bundle: .module), executed))
+            } else {
+                Text("…", bundle: .module)
+            }
+        case .generating(let chars):
+            Text(String(format: String(localized: "%lld chars", bundle: .module), chars))
+        case .waiting(let executed):
+            if executed > 0 {
+                Text(String(format: String(localized: "%lld tools run", bundle: .module), executed))
+            } else {
+                Text("…", bundle: .module)
+            }
+        }
+    }
+
+    private enum Activity {
+        case thinking(seconds: TimeInterval)
+        case runningTool(name: String, executedCount: Int)
+        case generating(chars: Int)
+        case waiting(executedCount: Int)
     }
 }
 
