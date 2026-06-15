@@ -86,25 +86,3 @@ public struct CustomAdapter: UsageAdapter {
         return v.numberValue
     }
 }
-
-private extension JSONValue {
-    init(any: Any) {
-        if let n = any as? NSNumber {
-            // Distinguish Bool from numeric: NSNumber wraps Bool as
-            // CFBoolean which is not directly introspectable; check the
-            // underlying objCType. For our use case all values are
-            // either plain numbers or we don't care.
-            self = .number(n.doubleValue)
-        } else if let s = any as? String {
-            self = .string(s)
-        } else if let b = any as? Bool {
-            self = .bool(b)
-        } else if let arr = any as? [Any] {
-            self = .array(arr.map { JSONValue(any: $0) })
-        } else if let dict = any as? [String: Any] {
-            self = .object(dict.mapValues { JSONValue(any: $0) })
-        } else {
-            self = .null
-        }
-    }
-}

@@ -52,6 +52,14 @@ public struct Phase: Identifiable, Equatable {
     /// True for the open trailing phase while the turn is streaming.
     public let isInProgress: Bool
 
+    public static func == (lhs: Phase, rhs: Phase) -> Bool {
+        lhs.id == rhs.id
+            && lhs.title == rhs.title
+            && lhs.summary == rhs.summary
+            && lhs.status == rhs.status
+            && lhs.durationSeconds == rhs.durationSeconds
+    }
+
     /// A short, human label for the kind of work a fallback phase
     /// did — used when there is no taskUpdate title. Returns a count
     /// of tool calls plus the first text line if any.
@@ -59,33 +67,6 @@ public struct Phase: Identifiable, Equatable {
         Self.subtitleForFallback(blocks: blocks)
     }
 
-    /// Plain-text digest of this phase's work, fed to the LLM when
-    /// generating a one-sentence summary. Includes tool names + a
-    /// trimmed view of their inputs/results and any assistant text,
-    /// capped so we don't blow the prompt on huge tool outputs.
-    public var digestForSummary: String {
-        var lines: [String] = []
-        for block in blocks {
-            if let text = block.text, !text.isEmpty {
-                lines.append("text: " + String(text.prefix(400)))
-            } else if let tool = block.toolCall {
-                let inputDigest = String((tool.input.values.compactMap { value -> String? in
-                    switch value {
-                    case .string(let s): return String(s.prefix(200))
-                    default: return nil
-                    }
-                }).joined(separator: " ").prefix(300))
-                var line = "tool: \(tool.name)"
-                if !inputDigest.isEmpty { line += " (\(inputDigest))" }
-                if let result = tool.result { line += " → " + String(result.prefix(200)) }
-                if tool.isError { line += " [error]" }
-                lines.append(line)
-            } else if let thinking = block.thinking, !thinking.isEmpty {
-                lines.append("thinking: " + String(thinking.prefix(200)))
-            }
-        }
-        return lines.isEmpty ? "(no content)" : lines.joined(separator: "\n")
-    }
 }
 
 private extension Phase {
@@ -131,11 +112,11 @@ public extension Phase {
         var accumulator: [MessageBlock] = []
 
         func flush(with closing: TaskUpdateMessage?, isInProgress: Bool) {
-            // A phase is only interesting if it has work to show OR
-            // a closing task update. Skip empty leading accumulators
-            // (e.g. when two taskUpdates arrive back to back).
-            let owned = closing.map { _ in true } ?? !accumulator.isEmpty
-            guard owned else { return }
+            // A phase is only interesting if it has real work to
+            // show. A bare taskUpdate with no intervening work is a
+            // boundary marker, not a useful empty phase.
+            let hasWork = accumulator.contains { $0.taskUpdate == nil }
+            guard hasWork else { return }
             phases.append(makePhase(
                 blocks: accumulator,
                 closing: closing,
@@ -183,7 +164,7 @@ public extension Phase {
         } else {
             // Fallback phase (no taskUpdate). Derive a stable id and
             // a title from the work it contains.
-            id = "fallback-" + (blocks.first?.id ?? UUID().uuidString)
+            id = "fallback-" + (blocks.first?.id ?? "empty")
             let subtitle = subtitleForFallback(blocks: blocks)
             return Phase(
                 id: id,

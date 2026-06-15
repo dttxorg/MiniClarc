@@ -368,9 +368,17 @@ struct ProjectTabButton: View {
         }
         .buttonStyle(.plain)
         .onTapGesture(count: 2) {
+            guard appState.beginProjectWindowOpenIfNeeded(project.id) else { return }
             openWindow(id: "project-window", value: ProjectWindowValue(projectId: project.id, instanceId: UUID()))
         }
         .contextMenu {
+            Button {
+                guard appState.beginProjectWindowOpenIfNeeded(project.id) else { return }
+                openWindow(id: "project-window", value: ProjectWindowValue(projectId: project.id, instanceId: UUID()))
+            } label: {
+                Label("Open in Project Window", systemImage: "macwindow")
+            }
+            Divider()
             Button {
                 renameText = project.name
                 projectToRename = project

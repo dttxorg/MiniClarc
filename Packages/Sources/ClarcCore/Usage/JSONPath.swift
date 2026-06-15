@@ -1,11 +1,9 @@
 import Foundation
 
-/// A parsed JSON path expression. Path components are evaluated right-to-left
-/// at lookup time: `.key(name, rest)` means "descend into the dictionary
-/// at `name`, then evaluate `rest`"; `.index(n, rest)` means "index array
-/// at position `n`, then evaluate `rest`"; `.predicate(k, v, rest)` means
-/// "from the array, pick the first element whose `k` field equals `v`,
-/// then evaluate `rest`".
+/// A parsed JSON path expression. The tree stores the leaf segment first:
+/// `a.b[0]` is represented as `.index(0, .key("b", .key("a", .root)))`.
+/// Lookup resolves `rest` from the root value first, then applies the
+/// current key/index/predicate segment to that intermediate value.
 public indirect enum JSONPath: Sendable, Equatable {
     case root
     case key(String, JSONPath)
@@ -25,71 +23,38 @@ public enum JSONPathParseError: Error, Equatable, Sendable {
 public enum JSONPathParser {
 
     public static func parse(_ source: String) throws -> JSONPath {
-        var iter = source.makeIterator()
+        let chars = Array(source)
         var position = 0
-        let path = try parseComponent(iterator: &iter, position: &position)
-        if iter.next() != nil {
-            throw JSONPathParseError.trailingContent(position)
-        }
-        return path
-    }
-
-    // MARK: - Component parser
-
-    private static func parseComponent(
-        iterator: inout String.Iterator,
-        position: inout Int
-    ) throws -> JSONPath {
         var path: JSONPath = .root
-        var current: Character? = iterator.next()
-        if current != nil { position += 1 }
 
-        while let c = current {
-            switch c {
-            case ".":
-                // Consume '.', then read identifier or digit.
-                guard let after = iterator.next() else {
-                    throw JSONPathParseError.unexpectedCharacter(".", position)
-                }
+        while position < chars.count {
+            if chars[position] == "." {
                 position += 1
-                if after == "[" {
-                    path = try parseBracketSegment(into: path, iterator: &iterator, position: &position)
-                    current = iterator.next()
-                    if current != nil { position += 1 }
-                } else if after.isNumber {
-                    // .0.b — number is the index, then continue
-                    let (idx, consumed) = try parseDigits(first: after, iterator: &iterator, position: &position)
-                    path = .index(idx, path)
-                    current = consumed
-                } else if after.isLetter || after == "_" {
-                    let (name, afterChar) = try parseIdentifier(first: after, iterator: &iterator, position: &position)
-                    path = .key(name, path)
-                    current = afterChar
-                } else {
-                    throw JSONPathParseError.unexpectedCharacter(after, position - 1)
-                }
-
-            case "[":
-                path = try parseBracketSegment(into: path, iterator: &iterator, position: &position)
-                current = iterator.next()
-                if current != nil { position += 1 }
-
-            case "]":
-                // Caller (parseBracketSegment) handles closing bracket
-                // by passing us a new next. This case shouldn't fire at
-                // the top level.
-                return path
-
-            default:
-                if c.isLetter || c == "_" {
-                    let (name, after) = try parseIdentifier(first: c, iterator: &iterator, position: &position)
-                    path = .key(name, path)
-                    current = after
-                } else {
-                    throw JSONPathParseError.unexpectedCharacter(c, position - 1)
+                guard position < chars.count else {
+                    throw JSONPathParseError.unexpectedCharacter(".", position - 1)
                 }
             }
+
+            let current = chars[position]
+            if current == "[" {
+                path = try parseBracketSegment(into: path, chars: chars, position: &position)
+            } else if current.isNumber {
+                let index = try parseDigits(chars: chars, position: &position)
+                path = .index(index, path)
+            } else if current.isLetter || current == "_" {
+                let name = try parseIdentifier(chars: chars, position: &position)
+                path = .key(name, path)
+            } else {
+                throw JSONPathParseError.unexpectedCharacter(current, position)
+            }
+
+            if position < chars.count,
+               chars[position] != ".",
+               chars[position] != "[" {
+                throw JSONPathParseError.trailingContent(position)
+            }
         }
+
         return path
     }
 
@@ -97,107 +62,106 @@ public enum JSONPathParser {
 
     private static func parseBracketSegment(
         into path: JSONPath,
-        iterator: inout String.Iterator,
+        chars: [Character],
         position: inout Int
     ) throws -> JSONPath {
-        guard let first = iterator.next() else {
+        position += 1
+        guard position < chars.count else {
             throw JSONPathParseError.unclosedBracket(position)
         }
-        position += 1
+        let first = chars[position]
         if first == "@" {
-            // predicate: @k=v
-            guard let k1 = iterator.next() else {
+            position += 1
+            guard position < chars.count else {
                 throw JSONPathParseError.emptyPredicate(position)
             }
-            position += 1
-            let (key, afterKey) = try parseIdentifier(first: k1, iterator: &iterator, position: &position)
-            guard let eq = iterator.next() else {
+            let key = try parseIdentifier(chars: chars, position: &position)
+            guard position < chars.count else {
+                throw JSONPathParseError.missingEqualsInPredicate(position)
+            }
+            guard chars[position] == "=" else {
                 throw JSONPathParseError.missingEqualsInPredicate(position)
             }
             position += 1
-            guard eq == "=" else {
-                throw JSONPathParseError.missingEqualsInPredicate(position - 1)
-            }
-            guard let v1 = iterator.next() else {
+            guard position < chars.count else {
                 throw JSONPathParseError.emptyPredicate(position)
             }
-            position += 1
-            let (value, afterValue) = try parseStringValue(first: v1, iterator: &iterator, position: &position)
-            guard let close = iterator.next() else {
+            let value = try parseStringValue(chars: chars, position: &position)
+            guard position < chars.count, chars[position] == "]" else {
                 throw JSONPathParseError.unclosedBracket(position)
             }
             position += 1
-            guard close == "]" else {
-                throw JSONPathParseError.unexpectedCharacter(close, position - 1)
-            }
             return .predicate(key, value, path)
         } else if first.isNumber {
-            let (idx, after) = try parseDigits(first: first, iterator: &iterator, position: &position)
-            guard let close = iterator.next() else {
+            let index = try parseDigits(chars: chars, position: &position)
+            guard position < chars.count else {
                 throw JSONPathParseError.unclosedBracket(position)
             }
-            position += 1
-            guard close == "]" else {
-                throw JSONPathParseError.unexpectedCharacter(close, position - 1)
+            guard chars[position] == "]" else {
+                throw JSONPathParseError.unexpectedCharacter(chars[position], position)
             }
-            return .index(idx, path)
+            position += 1
+            return .index(index, path)
         } else {
-            throw JSONPathParseError.unexpectedCharacter(first, position - 1)
+            throw JSONPathParseError.unexpectedCharacter(first, position)
         }
     }
 
     // MARK: - Primitive parsers
 
     private static func parseIdentifier(
-        first: Character,
-        iterator: inout String.Iterator,
+        chars: [Character],
         position: inout Int
-    ) throws -> (String, Character?) {
-        var name = String(first)
-        var c: Character? = iterator.next()
-        if c != nil { position += 1 }
-        while let ch = c, ch.isLetter || ch.isNumber || ch == "_" {
-            name.append(ch)
-            c = iterator.next()
-            if c != nil { position += 1 }
+    ) throws -> String {
+        guard position < chars.count else {
+            throw JSONPathParseError.unexpectedCharacter("\0", position)
         }
-        return (name, c)
+        let first = chars[position]
+        guard first.isLetter || first == "_" else {
+            throw JSONPathParseError.unexpectedCharacter(first, position)
+        }
+        let start = position
+        position += 1
+        while position < chars.count {
+            let ch = chars[position]
+            guard ch.isLetter || ch.isNumber || ch == "_" else { break }
+            position += 1
+        }
+        return String(chars[start..<position])
     }
 
     private static func parseDigits(
-        first: Character,
-        iterator: inout String.Iterator,
+        chars: [Character],
         position: inout Int
-    ) throws -> (Int, Character?) {
-        var digits = String(first)
-        var c: Character? = iterator.next()
-        if c != nil { position += 1 }
-        while let ch = c, ch.isNumber {
-            digits.append(ch)
-            c = iterator.next()
-            if c != nil { position += 1 }
+    ) throws -> Int {
+        guard position < chars.count, chars[position].isNumber else {
+            let ch = position < chars.count ? chars[position] : "\0"
+            throw JSONPathParseError.unexpectedCharacter(ch, position)
         }
+        let start = position
+        position += 1
+        while position < chars.count, chars[position].isNumber {
+            position += 1
+        }
+        let digits = String(chars[start..<position])
         guard let value = Int(digits) else {
-            throw JSONPathParseError.unexpectedCharacter(first, position - digits.count)
+            throw JSONPathParseError.unexpectedCharacter(chars[start], start)
         }
-        return (value, c)
+        return value
     }
 
     private static func parseStringValue(
-        first: Character,
-        iterator: inout String.Iterator,
+        chars: [Character],
         position: inout Int
-    ) throws -> (String, Character?) {
-        // Bare value: read until we hit ']'
-        var s = String(first)
-        var c: Character? = iterator.next()
-        if c != nil { position += 1 }
-        while let ch = c, ch != "]" {
-            s.append(ch)
-            c = iterator.next()
-            if c != nil { position += 1 }
+    ) throws -> String {
+        let start = position
+        while position < chars.count, chars[position] != "]" {
+            position += 1
         }
-        return (s, c)
+        guard position > start else {
+            throw JSONPathParseError.emptyPredicate(position)
+        }
+        return String(chars[start..<position])
     }
 }
 
@@ -212,13 +176,14 @@ extension JSONPath {
         case .root:
             return root
         case .key(let name, let rest):
-            guard let next = root[name] else { return nil }
-            return rest.lookup(in: next)
+            guard let base = rest.lookup(in: root) else { return nil }
+            return base[name]
         case .index(let n, let rest):
-            guard let next = root[n] else { return nil }
-            return rest.lookup(in: next)
+            guard let base = rest.lookup(in: root) else { return nil }
+            return base[n]
         case .predicate(let key, let value, let rest):
-            guard case .array(let arr) = root,
+            guard let base = rest.lookup(in: root),
+                  case .array(let arr) = base,
                   let match = arr.first(where: { element in
                       if case .string(let s)? = element[key] {
                           return s == value
@@ -226,7 +191,7 @@ extension JSONPath {
                       return false
                   })
             else { return nil }
-            return rest.lookup(in: match)
+            return match
         }
     }
 }

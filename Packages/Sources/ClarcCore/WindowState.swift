@@ -50,11 +50,6 @@ public final class WindowState {
     /// single chat session.
     public let taskProgressStore = TaskProgressStore()
 
-    /// Per-window store for LLM-generated one-sentence phase
-    /// summaries. Owned by the window so summaries stay scoped to a
-    /// single chat session.
-    public let phaseSummaryStore = PhaseSummaryStore()
-
     // MARK: - Project / Session Selection
 
     public var selectedProject: Project?

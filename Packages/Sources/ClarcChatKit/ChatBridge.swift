@@ -57,10 +57,6 @@ public final class ChatBridge {
     public var sessionStats: ChatSessionStats = ChatSessionStats()
     public var autoPreviewSettings: AttachmentAutoPreviewSettings = AttachmentAutoPreviewSettings()
     public weak var taskProgressStore: TaskProgressStore?
-    /// LLM-generated one-sentence summaries for completed phases,
-    /// used by `PhaseBlock` / `PhaseTitleRow`. Weak because the
-    /// store is owned by `WindowState`.
-    public weak var phaseSummaryStore: PhaseSummaryStore?
 
     // MARK: - Action Handlers (set up by the app target)
 

@@ -397,7 +397,24 @@ final class AppState {
     @ObservationIgnored
     var openProjectWindowCounts: [UUID: Int] = [:]
 
+    @ObservationIgnored
+    private var pendingProjectWindowOpens: [UUID: Date] = [:]
+
+    func beginProjectWindowOpenIfNeeded(_ projectId: UUID) -> Bool {
+        let now = Date()
+        pendingProjectWindowOpens = pendingProjectWindowOpens.filter {
+            now.timeIntervalSince($0.value) < 2
+        }
+        guard !hasOpenProjectWindow(for: projectId),
+              pendingProjectWindowOpens[projectId] == nil else {
+            return false
+        }
+        pendingProjectWindowOpens[projectId] = now
+        return true
+    }
+
     func registerOpenProjectWindow(_ projectId: UUID) {
+        pendingProjectWindowOpens.removeValue(forKey: projectId)
         openProjectWindowCounts[projectId, default: 0] += 1
     }
 
@@ -854,7 +871,12 @@ final class AppState {
         }
         bridge.compactHandler = { [weak self, weak window] in
             guard let self, let window else { return }
-            _ = try? await self.compactService.run(in: window)
+            do {
+                _ = try await self.compactService.run(in: window)
+            } catch {
+                window.errorMessage = error.localizedDescription
+                window.showError = true
+            }
         }
         bridge.editAndResendHandler = { [weak self, weak window] messageId, newContent in
             guard let self, let window else { return }
@@ -874,7 +896,6 @@ final class AppState {
             )
         }
         bridge.taskProgressStore = window.taskProgressStore
-        bridge.phaseSummaryStore = window.phaseSummaryStore
 
         startBridgeObservation(bridge, for: window)
     }
@@ -1671,17 +1692,6 @@ final class AppState {
                                 updateState(key) { $0.lastTurnContextUsedPercentage = pct }
                             }
                         }
-
-                        // Per-phase LLM summaries: for each completed
-                        // phase that doesn't have a summary yet, ask
-                        // the model for a one-sentence recap and store
-                        // it so the phase header / collapsed-turn view
-                        // can show what was accomplished. Skips phases
-                        // that already have a title from their closing
-                        // taskUpdate only when that title is already a
-                        // real sentence — to keep behaviour simple we
-                        // summarise every closed phase regardless.
-                        summarizeCompletedPhases(sessionKey: key, in: window, cwd: cwdCapture)
 
                         if notificationsEnabled && !NSApp.isActive {
                             let title = allSessionSummaries.first(where: { $0.id == resultEvent.sessionId })?.title ?? "New Session"
@@ -3272,56 +3282,6 @@ final class AppState {
             return parsed
         }
         return .default
-    }
-
-    // MARK: - Phase Summaries
-
-    /// After a turn finishes, generate a one-sentence LLM summary for
-    /// each completed phase that doesn't already have one. Runs fully
-    /// in the background — failures are non-fatal (the phase header
-    /// just falls back to its existing title/subtitle).
-    ///
-    /// Uses the default model (no `--model haiku` downgrade) per
-    /// product decision: quality over token cost.
-    private func summarizeCompletedPhases(sessionKey: String, in window: WindowState, cwd: String?) {
-        let store = window.phaseSummaryStore
-        let state = sessionStates[sessionKey]
-        // Only the assistant messages carry phase-able blocks; the
-        // user prompt does not form phases. Flatten all assistant
-        // messages of the turn into one block stream so phase
-        // boundaries line up with what the UI renders.
-        let assistantBlocks = state?.allMessages.flatMap { msg -> [MessageBlock] in
-            msg.role == .assistant ? msg.blocks : []
-        } ?? []
-        let phases = Phase.makePhases(from: assistantBlocks, isStreamingLast: false)
-        let toSummarize = phases.filter { phase in
-            phase.status == .done
-                && store.summary(for: phase.id) == nil
-                && !store.isPending(phase.id)
-                && !store.hasFailed(phase.id)
-        }
-        guard !toSummarize.isEmpty else { return }
-        for phase in toSummarize {
-            store.markPending(phase.id)
-        }
-        let claudeRef = self.claude
-        let digestPairs = toSummarize.map { ($0.id, $0.digestForSummary) }
-        Task { [weak self] in
-            guard let self else { return }
-            for (phaseId, digest) in digestPairs {
-                do {
-                    let summary = try await claudeRef.summarizePhase(content: digest, cwd: cwd)
-                    let trimmed = summary.isEmpty ? nil : summary
-                    if let trimmed {
-                        await MainActor.run { store.setSummary(trimmed, for: phaseId) }
-                    } else {
-                        await MainActor.run { store.markFailed(phaseId) }
-                    }
-                } catch {
-                    await MainActor.run { store.markFailed(phaseId) }
-                }
-            }
-        }
     }
 
     // MARK: - Context Compaction

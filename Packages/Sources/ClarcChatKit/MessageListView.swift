@@ -16,16 +16,16 @@ struct MessageListView: View {
     @State private var scrollTask: Task<Void, Never>?
     @State private var isNearBottom = true
     @State private var isSessionReady = false
+    @State private var showAllTurns = false
     /// Per-turn collapse override set by the user. `true` = user
     /// collapsed the turn, `false` = user expanded the turn. Absent
     /// = use the default "only the last turn expanded" baseline.
     @State private var collapseOverrides: [UUID: Bool] = [:]
 
-    /// Hard cap on the number of turns rendered at once. Long
-    /// sessions keep only the most recent `visibleTurnCap` turns in
-    /// the view tree; older ones are dropped. The per-turn collapse
-    /// arrow and the "collapse all" toolbar button still apply to
-    /// the turns that remain visible.
+    /// Soft cap on the number of turns rendered at once. Long
+    /// sessions start with only the most recent `visibleTurnCap`
+    /// turns in the view tree, with an explicit disclosure button
+    /// for the hidden earlier turns.
     private static let visibleTurnCap = 200
 
     var body: some View {
@@ -84,6 +84,7 @@ struct MessageListView: View {
             // (or returning to one) does not leak stale collapse
             // overrides from the previous session.
             collapseOverrides.removeAll()
+            showAllTurns = false
             chatBridge.collapseAllTurns = false
             scrollPosition = ScrollPosition()
             rebuildSettledItems()
@@ -139,22 +140,97 @@ struct MessageListView: View {
     @ViewBuilder
     private func settledContent() -> some View {
         let visible = makeVisibleTurns()
-        let lastId = visible.last?.id
+        let turns = visible.turns
+        let lastId = turns.last?.id
 
         if let record = chatBridge.compactionRecord {
             CompactBanner(record: record)
         }
 
-        ForEach(visible) { turn in
-            let isLast = turn.id == lastId
-            TurnBlock(
-                turn: turn,
-                forceCollapsed: chatBridge.collapseAllTurns,
-                isCollapsed: isTurnCollapsed(turnId: turn.id, isLast: isLast),
-                onToggle: { toggleCollapse(for: turn.id, isLast: isLast) }
-            )
-            .id(turn.id)
+        if visible.hiddenCount > 0 {
+            earlierTurnsButton(hiddenCount: visible.hiddenCount)
         }
+
+        ForEach(turns) { item in
+            let isLast = item.id == lastId
+            TurnBlock(
+                turn: item.turn,
+                phases: item.phases,
+                forceCollapsed: chatBridge.collapseAllTurns,
+                isCollapsed: isTurnCollapsed(turnId: item.id, isLast: isLast),
+                onToggle: { toggleCollapse(for: item.id, isLast: isLast) }
+            )
+            .id(item.id)
+        }
+    }
+
+    private func earlierTurnsButton(hiddenCount: Int) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showAllTurns.toggle()
+                if !showAllTurns {
+                    scrollPosition.scrollTo(edge: .top)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: showAllTurns ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(showAllTurns
+                     ? "Hide earlier turns"
+                     : String(format: "Show %lld earlier turns", hiddenCount))
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(ClaudeTheme.accent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(ClaudeTheme.accentSubtle)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private struct VisibleTurn: Identifiable, Equatable {
+        let turn: Turn
+        let phases: [Phase]
+
+        var id: UUID { turn.id }
+    }
+
+    private struct VisibleTurns {
+        let turns: [VisibleTurn]
+        let hiddenCount: Int
+    }
+
+    private func focusFiltered(_ messages: [ChatMessage]) -> [ChatMessage] {
+        guard windowState.focusMode else { return messages }
+        return messages.filter { $0.role == .user || $0.isResponseComplete || $0.isCompactBoundary }
+    }
+
+    private func visibleSlice(from all: [VisibleTurn]) -> VisibleTurns {
+        let cap = Self.visibleTurnCap
+        guard all.count > cap else {
+            return VisibleTurns(turns: all, hiddenCount: 0)
+        }
+        let hiddenCount = all.count - cap
+        guard !showAllTurns else {
+            return VisibleTurns(turns: all, hiddenCount: hiddenCount)
+        }
+        return VisibleTurns(turns: Array(all.suffix(cap)), hiddenCount: hiddenCount)
+    }
+
+    private func phases(for turn: Turn) -> [Phase] {
+        let assistantBlocks = turn.assistantMessages.flatMap { $0.blocks }
+        return Phase.makePhases(from: assistantBlocks, isStreamingLast: turn.isInProgress)
+    }
+
+    private func sourceMessagesForTurns() -> [ChatMessage] {
+        if let original = chatBridge.compactionRecord?.originalMessages {
+            return focusFiltered(original)
+        }
+        return settledItems
     }
 
     /// True if the turn with the given id should render collapsed.
@@ -186,15 +262,13 @@ struct MessageListView: View {
     /// snapshot from `compactionRecord` instead of the live
     /// `settledItems` (which has been replaced with the compacted
     /// list for CLI transmission).
-    private func makeVisibleTurns() -> [Turn] {
-        let source: [ChatMessage] = chatBridge.compactionRecord?.originalMessages ?? settledItems
+    private func makeVisibleTurns() -> VisibleTurns {
+        let source = sourceMessagesForTurns()
         let all = Turn.makeTurns(from: source, isStreamingLast: chatBridge.isStreaming)
-        // Cap to `visibleTurnCap` turns so very long sessions don't
-        // build tens of thousands of TurnBlock views. We keep the
-        // most recent turns.
-        let cap = Self.visibleTurnCap
-        if all.count <= cap { return all }
-        return Array(all.suffix(cap))
+            .map { turn in
+                VisibleTurn(turn: turn, phases: phases(for: turn))
+            }
+        return visibleSlice(from: all)
     }
 
     // MARK: - Helpers
@@ -394,17 +468,12 @@ private struct CompactBanner: View {
 /// be re-applied when a new user message arrives).
 private struct TurnBlock: View {
     let turn: Turn
+    let phases: [Phase]
     let forceCollapsed: Bool
     /// Final isCollapsed value, computed by the parent. Toggling
     /// writes back to the parent's override map.
     let isCollapsed: Bool
     let onToggle: () -> Void
-
-    /// All assistant blocks of this turn, flattened, used to derive
-    /// the phase list.
-    private var assistantBlocks: [MessageBlock] {
-        turn.assistantMessages.flatMap { $0.blocks }
-    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -444,9 +513,7 @@ private struct TurnBlock: View {
     /// its title, and an optional duration — so a collapsed turn
     /// still answers "what did the assistant do here?".
     private var collapsedSummary: some View {
-        let phases = Phase.makePhases(from: assistantBlocks, isStreamingLast: turn.isInProgress)
-
-        return VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
             // User prompt line (omitted for orphan turns so the row
             // isn't visually blank — the phase list leads instead).
             if !turn.userMessage.content.isEmpty {
@@ -486,7 +553,6 @@ private struct TurnBlock: View {
             MessageBubble(message: turn.userMessage)
         }
 
-        let phases = Phase.makePhases(from: assistantBlocks, isStreamingLast: turn.isInProgress)
         if phases.isEmpty {
             // No phase boundaries — render the raw assistant bubbles
             // (preserves the original behaviour for plain text turns).
@@ -507,22 +573,13 @@ private struct TurnBlock: View {
 /// `TurnBlock`. Mirrors the visual language of the expanded
 /// `PhaseBlock` header so the two states read consistently.
 private struct PhaseTitleRow: View {
-    @Environment(ChatBridge.self) private var chatBridge
     let phase: Phase
-
-    private var displaySummary: String? {
-        chatBridge.phaseSummaryStore?.summary(for: phase.id)
-    }
 
     var body: some View {
         HStack(spacing: 6) {
             phaseStatusIcon
                 .frame(width: 12, height: 12)
-            // Prefer the LLM-generated one-sentence summary when
-            // available (it is more descriptive than the fallback
-            // "N tools · first-line" title); otherwise show the
-            // derived title.
-            Text(displaySummary ?? phase.title)
+            Text(phase.title)
                 .font(.system(size: 12))
                 .foregroundStyle(ClaudeTheme.textSecondary)
                 .lineLimit(1)
@@ -560,7 +617,6 @@ private struct PhaseTitleRow: View {
 /// Expanding reveals the phase's message bubbles (thinking, tool
 /// calls, text).
 private struct PhaseBlock: View {
-    @Environment(ChatBridge.self) private var chatBridge
     let phase: Phase
     @State private var isExpanded: Bool
 
@@ -606,9 +662,7 @@ private struct PhaseBlock: View {
         } label: {
             HStack(alignment: .center, spacing: 8) {
                 statusIcon.frame(width: 14, height: 14)
-                // Title: prefer the LLM-generated one-sentence summary
-                // (most descriptive), else the derived title.
-                Text(chatBridge.phaseSummaryStore?.summary(for: phase.id) ?? phase.title)
+                Text(phase.title)
                     .font(.system(size: ClaudeTheme.messageSize(13), weight: .semibold))
                     .foregroundStyle(ClaudeTheme.textPrimary)
                     .lineLimit(1)

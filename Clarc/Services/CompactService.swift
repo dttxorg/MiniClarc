@@ -104,9 +104,9 @@ enum CompactError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .tooShort: return "对话太短,无需压缩"
-        case .noSession: return "未找到当前 session"
-        case .cancelled: return "压缩已取消"
+        case .tooShort: return "The conversation is too short to compact."
+        case .noSession: return "No current session was found."
+        case .cancelled: return "Compaction was cancelled."
         }
     }
 }

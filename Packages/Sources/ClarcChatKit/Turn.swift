@@ -25,6 +25,12 @@ struct Turn: Identifiable, Equatable {
     /// Used to force-expand the last turn even if the default rule
     /// would collapse it.
     var isInProgress: Bool
+
+    static func == (lhs: Turn, rhs: Turn) -> Bool {
+        lhs.id == rhs.id
+            && lhs.userMessage == rhs.userMessage
+            && lhs.assistantMessages == rhs.assistantMessages
+    }
 }
 
 extension Turn {
@@ -78,7 +84,7 @@ extension Turn {
                     // Orphan: assistant block with no preceding user.
                     let placeholder = Turn.orphanUserPlaceholder()
                     current = Turn(
-                        id: UUID(),
+                        id: msg.id,
                         userMessage: placeholder,
                         assistantMessages: [msg],
                         isInProgress: msg.isStreaming
