@@ -15,15 +15,18 @@ struct MessageListView: View {
     @State private var settledItems: [ChatMessage] = []
     @State private var scrollTask: Task<Void, Never>?
     @State private var isNearBottom = true
-    @State private var isOlderCollapsed = true
     @State private var isSessionReady = false
     /// Per-turn collapse override set by the user. `true` = user
     /// collapsed the turn, `false` = user expanded the turn. Absent
     /// = use the default "only the last turn expanded" baseline.
     @State private var collapseOverrides: [UUID: Bool] = [:]
 
-    /// Read fold threshold from the per-window mirror. 0 disables folding.
-    private var foldThreshold: Int { windowState.foldThreshold }
+    /// Hard cap on the number of turns rendered at once. Long
+    /// sessions keep only the most recent `visibleTurnCap` turns in
+    /// the view tree; older ones are dropped. The per-turn collapse
+    /// arrow and the "collapse all" toolbar button still apply to
+    /// the turns that remain visible.
+    private static let visibleTurnCap = 200
 
     var body: some View {
         ScrollView {
@@ -78,7 +81,10 @@ struct MessageListView: View {
         .task(id: windowState.currentSessionId) {
             isSessionReady = false
             scrollTask?.cancel()
-            isOlderCollapsed = true
+            // Reset every per-session UI state so switching sessions
+            // (or returning to one) does not leak stale collapse
+            // overrides from the previous session.
+            collapseOverrides.removeAll()
             chatBridge.collapseAllTurns = false
             scrollPosition = ScrollPosition()
             rebuildSettledItems()
@@ -96,15 +102,7 @@ struct MessageListView: View {
             withAnimation(.easeIn(duration: 0.15)) { isSessionReady = true }
         }
         .onChange(of: chatBridge.isStreaming) { old, new in
-            // A new turn started — collapse any previously expanded earlier
-            // messages so the chat list stays scrollable once the turn
-            // adds more entries. Without this, expanding the fold stays
-            // sticky for the rest of the session and the list grows
-            // unbounded, which is what made the window feel sluggish.
-            if !old && new {
-                isOlderCollapsed = true
-            }
-            // Only update when streaming ends — settled list doesn't change at start, so skip
+            // Only update when streaming ends — settled list doesn't change at start, so skip.
             if old && !new {
                 rebuildSettledItems()
                 scrollToBottomDebounced()
@@ -133,40 +131,6 @@ struct MessageListView: View {
         }
     }
 
-    /// Renders the fold placeholder + the per-turn message rows.
-    /// The fold placeholder is shown whenever the user has folded
-    /// some earlier turns out of view. The label switches between
-    /// "Show N earlier turns" and "Collapse earlier turns" based on
-    /// the current state.
-    private func foldToggleButton(hiddenCount: Int) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                isOlderCollapsed.toggle()
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Group {
-                    if isOlderCollapsed {
-                        Text(String(format: String(localized: "Show %lld earlier turns", bundle: .module), hiddenCount))
-                    } else {
-                        Text("Collapse earlier turns", bundle: .module)
-                    }
-                }
-                .font(.system(size: ClaudeTheme.size(12), weight: .medium))
-                Image(systemName: isOlderCollapsed ? "chevron.down" : "chevron.up")
-                    .font(.system(size: ClaudeTheme.size(10), weight: .medium))
-            }
-            .foregroundStyle(ClaudeTheme.textTertiary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: ClaudeTheme.cornerRadiusSmall)
-                    .fill(ClaudeTheme.surfacePrimary.opacity(0.6))
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     /// Renders the turn list. Each turn is wrapped in a `TurnBlock`
     /// that knows how to render itself collapsed or expanded.
     /// The collapse state is computed per-turn: by default only
@@ -183,11 +147,12 @@ struct MessageListView: View {
         }
 
         ForEach(visible) { turn in
+            let isLast = turn.id == lastId
             TurnBlock(
                 turn: turn,
                 forceCollapsed: chatBridge.collapseAllTurns,
-                isCollapsed: isTurnCollapsed(turnId: turn.id, isLast: turn.id == lastId),
-                onToggle: { toggleCollapse(for: turn.id) }
+                isCollapsed: isTurnCollapsed(turnId: turn.id, isLast: isLast),
+                onToggle: { toggleCollapse(for: turn.id, isLast: isLast) }
             )
             .id(turn.id)
         }
@@ -206,8 +171,14 @@ struct MessageListView: View {
 
     /// Toggle a turn's collapse state. Persists in `collapseOverrides`
     /// so the choice sticks across `makeTurns` re-derivations.
-    private func toggleCollapse(for turnId: UUID) {
-        let current = collapseOverrides[turnId] ?? true
+    ///
+    /// The flip is based on the *effective rendered state* (which
+    /// accounts for the "only the last turn expanded" baseline), not a
+    /// guessed default — otherwise toggling the last turn is a no-op
+    /// because its baseline is "expanded" and `?? true` would write
+    /// back the same value.
+    private func toggleCollapse(for turnId: UUID, isLast: Bool) {
+        let current = isTurnCollapsed(turnId: turnId, isLast: isLast)
         collapseOverrides[turnId] = !current
     }
 
@@ -218,32 +189,16 @@ struct MessageListView: View {
     /// list for CLI transmission).
     private func makeVisibleTurns() -> [Turn] {
         let source: [ChatMessage] = chatBridge.compactionRecord?.originalMessages ?? settledItems
-        let all = Turn.makeTurns(
-            from: source,
-            isStreamingLast: chatBridge.isStreaming,
-            foldThreshold: windowState.foldThreshold
-        )
-        // Cap to foldThreshold + 100 visible (virtualization cap).
-        let cap = max(0, windowState.foldThreshold) + 100
+        let all = Turn.makeTurns(from: source, isStreamingLast: chatBridge.isStreaming)
+        // Cap to `visibleTurnCap` turns so very long sessions don't
+        // build tens of thousands of TurnBlock views. We keep the
+        // most recent turns.
+        let cap = Self.visibleTurnCap
         if all.count <= cap { return all }
         return Array(all.suffix(cap))
     }
 
     // MARK: - Helpers
-
-    @ViewBuilder
-    private func messageRows(_ messages: some RandomAccessCollection<ChatMessage>) -> some View {
-        let groups = groupMessages(Array(messages))
-        ForEach(groups) { group in
-            if group.isTransientGroup {
-                TransientGroupSummaryView(messages: group.messages)
-                    .id(group.id)
-            } else if let message = group.messages.first {
-                MessageBubble(message: message)
-                    .id(message.id)
-            }
-        }
-    }
 
     // MARK: - Message Grouping
 
@@ -429,10 +384,11 @@ private struct CompactBanner: View {
 
 // MARK: - Turn Block
 
-/// One collapsible block per user turn. Renders either a 30/50-char
-/// preview (collapsed) or the full message bubbles (expanded). The
-/// collapsed preview never builds the bubble subtrees, so a long
-/// history with many collapsed turns stays cheap.
+/// One collapsible block per user turn. Collapsed, it shows the
+/// user prompt plus a list of **phase titles** (the Codex-style
+/// "what happened in this turn" summary) so the user can see at a
+/// glance what the assistant did without expanding. Expanded, each
+/// phase renders as its own collapsible `PhaseBlock`.
 ///
 /// Collapse state is sourced from `MessageListView` (it owns the
 /// override map so the "only the last turn expanded" baseline can
@@ -444,6 +400,12 @@ private struct TurnBlock: View {
     /// writes back to the parent's override map.
     let isCollapsed: Bool
     let onToggle: () -> Void
+
+    /// All assistant blocks of this turn, flattened, used to derive
+    /// the phase list.
+    private var assistantBlocks: [MessageBlock] {
+        turn.assistantMessages.flatMap { $0.blocks }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -476,18 +438,47 @@ private struct TurnBlock: View {
         )
     }
 
+    // MARK: - Collapsed
+
+    /// The user prompt (first line) plus a compact list of the
+    /// phases the turn went through. Each phase shows a status icon,
+    /// its title, and an optional duration — so a collapsed turn
+    /// still answers "what did the assistant do here?".
     private var collapsedSummary: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(turn.collapsedUserText)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(ClaudeTheme.textTertiary)
-                .lineLimit(1)
-            Text(turn.collapsedAssistantText)
-                .font(.system(size: 12))
-                .foregroundStyle(ClaudeTheme.textSecondary)
-                .lineLimit(1)
+        let phases = Phase.makePhases(from: assistantBlocks, isStreamingLast: turn.isInProgress)
+
+        return VStack(alignment: .leading, spacing: 3) {
+            // User prompt line (omitted for orphan turns so the row
+            // isn't visually blank — the phase list leads instead).
+            if !turn.userMessage.content.isEmpty {
+                Text(turn.collapsedUserText)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(ClaudeTheme.textTertiary)
+                    .lineLimit(1)
+            }
+            // Phase summary lines.
+            if phases.isEmpty {
+                // No phases yet (e.g. a user-only turn). Fall back to
+                // the assistant text preview so the row is never empty.
+                Text(turn.collapsedAssistantText.isEmpty ? "…" : turn.collapsedAssistantText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(ClaudeTheme.textSecondary)
+                    .lineLimit(1)
+            } else {
+                ForEach(phases.prefix(8)) { phase in
+                    PhaseTitleRow(phase: phase)
+                }
+                if phases.count > 8 {
+                    Text(String(format: String(localized: "+ %lld more phases", bundle: .module), phases.count - 8))
+                        .font(.system(size: 11))
+                        .foregroundStyle(ClaudeTheme.textTertiary)
+                        .lineLimit(1)
+                }
+            }
         }
     }
+
+    // MARK: - Expanded
 
     @ViewBuilder
     private var expandedContent: some View {
@@ -495,8 +486,179 @@ private struct TurnBlock: View {
         if !turn.userMessage.content.isEmpty {
             MessageBubble(message: turn.userMessage)
         }
-        ForEach(turn.assistantMessages) { msg in
-            MessageBubble(message: msg)
+
+        let phases = Phase.makePhases(from: assistantBlocks, isStreamingLast: turn.isInProgress)
+        if phases.isEmpty {
+            // No phase boundaries — render the raw assistant bubbles
+            // (preserves the original behaviour for plain text turns).
+            ForEach(turn.assistantMessages) { msg in
+                MessageBubble(message: msg)
+            }
+        } else {
+            ForEach(phases) { phase in
+                PhaseBlock(phase: phase)
+            }
+        }
+    }
+}
+
+// MARK: - Phase Title Row (collapsed-turn summary)
+
+/// A single one-line phase summary used inside a collapsed
+/// `TurnBlock`. Mirrors the visual language of the expanded
+/// `PhaseBlock` header so the two states read consistently.
+private struct PhaseTitleRow: View {
+    let phase: Phase
+
+    var body: some View {
+        HStack(spacing: 6) {
+            phaseStatusIcon
+                .frame(width: 12, height: 12)
+            Text(phase.title)
+                .font(.system(size: 12))
+                .foregroundStyle(ClaudeTheme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            if let dur = phase.durationSeconds {
+                Text(formatDuration(dur))
+                    .font(.system(size: 11, design: .monospaced).monospacedDigit())
+                    .foregroundStyle(ClaudeTheme.textTertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var phaseStatusIcon: some View {
+        switch phase.status {
+        case .running:
+            Image(systemName: "circle.dotted")
+                .foregroundStyle(ClaudeTheme.accent)
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(ClaudeTheme.statusSuccess)
+        case .failed:
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(ClaudeTheme.statusWarning)
+        }
+    }
+}
+
+// MARK: - Phase Block (expanded-turn detail)
+
+/// One collapsible phase inside an expanded turn. The header shows
+/// the phase title/status/duration (reusing `TaskUpdateCard`'s visual
+/// when a taskUpdate is available, otherwise a lightweight header).
+/// Expanding reveals the phase's message bubbles (thinking, tool
+/// calls, text).
+private struct PhaseBlock: View {
+    let phase: Phase
+    @State private var isExpanded: Bool
+
+    init(phase: Phase) {
+        self.phase = phase
+        // Default expansion mirrors TaskProgressStore: running/failed
+        // expand, done collapses. When there is no taskUpdate we keep
+        // the trailing (in-progress) phase expanded and collapse the
+        // settled ones.
+        _isExpanded = State(initialValue: phase.isInProgress || phase.status != .done)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    phaseDetail
+                }
+                .padding(.top, 8)
+                .transition(.opacity)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(ClaudeTheme.surfacePrimary).opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(ClaudeTheme.border, lineWidth: 0.5)
+        )
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                statusIcon.frame(width: 14, height: 14)
+                Text(phase.title)
+                    .font(.system(size: ClaudeTheme.messageSize(13), weight: .semibold))
+                    .foregroundStyle(ClaudeTheme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 6)
+                if !phase.summary.isEmpty {
+                    Text(phase.summary)
+                        .font(.system(size: ClaudeTheme.messageSize(12)))
+                        .foregroundStyle(ClaudeTheme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                if let dur = phase.durationSeconds {
+                    Text(formatDuration(dur))
+                        .font(.system(size: ClaudeTheme.messageSize(11), design: .monospaced).monospacedDigit())
+                        .foregroundStyle(ClaudeTheme.textTertiary)
+                }
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(ClaudeTheme.textTertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch phase.status {
+        case .running:
+            ProgressView().scaleEffect(0.65).frame(width: 14, height: 14)
+        case .done:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(ClaudeTheme.statusSuccess)
+        case .failed:
+            Image(systemName: "xmark.circle.fill").foregroundStyle(ClaudeTheme.statusWarning)
+        }
+    }
+
+    // MARK: Detail
+
+    /// Render the phase's blocks as a synthetic ChatMessage so the
+    /// existing `MessageBubble` does all the heavy lifting (tool
+    /// result views, thinking blocks, text). The taskUpdate block —
+    /// if present — is rendered via the dedicated `TaskUpdateCard`
+    /// so its files/tests sections show up.
+    @ViewBuilder
+    private var phaseDetail: some View {
+        let nonTaskBlocks = phase.blocks.filter { !$0.isTaskUpdate }
+        if !nonTaskBlocks.isEmpty {
+            // Synthetic assistant message carries only this phase's
+            // blocks; role/streaming flags are inherited from the
+            // phase progress so running phases keep streaming chrome.
+            let synthetic = ChatMessage(
+                role: .assistant,
+                blocks: nonTaskBlocks,
+                isStreaming: phase.isInProgress
+            )
+            MessageBubble(message: synthetic)
+        }
+        if let update = phase.taskUpdate {
+            TaskUpdateCard(update: update, isExpanded: .constant(true))
         }
     }
 }

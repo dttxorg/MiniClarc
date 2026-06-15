@@ -80,12 +80,8 @@ struct MainView: View {
                 .onChange(of: appState.focusMode) { _, newValue in
                     windowState.focusMode = newValue
                 }
-                .onChange(of: appState.foldThreshold) { _, newValue in
-                    windowState.foldThreshold = newValue
-                }
                 .onAppear {
                     windowState.focusMode = appState.focusMode
-                    windowState.foldThreshold = appState.foldThreshold
                 }
                 .navigationTitle({
                     // Use the marketing version (e.g. "2.0.0") and current

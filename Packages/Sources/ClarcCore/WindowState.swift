@@ -125,11 +125,6 @@ public final class WindowState {
 
     public var focusMode: Bool = false
 
-    // MARK: - Fold threshold
-
-    /// Per-window mirror of `AppState.foldThreshold`. 0 disables folding.
-    public var foldThreshold: Int = 8
-
     // MARK: - Session Switch Task
 
     private var sessionSwitchTask: Task<Void, Never>?

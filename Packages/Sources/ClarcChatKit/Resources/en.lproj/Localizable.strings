@@ -12,10 +12,9 @@
 "Thinking..." = "Thinking...";
 "Generating response..." = "Generating response...";
 // MARK: - Turn folding
-"Show %lld earlier turns" = "Show %lld earlier turns";
-"Collapse earlier turns" = "Collapse earlier turns";
 "Expand all turns" = "Expand all turns";
 "Collapse all turns" = "Collapse all turns";
+"+ %lld more phases" = "+ %lld more phases";
 
 // MARK: - Context compaction
 "Context compacted at %@" = "Context compacted at %@";
@@ -23,14 +22,6 @@
 "Show summary" = "Show summary";
 "Hide summary" = "Hide summary";
 "Compact context" = "Compact context";
-
-// MARK: - Fold threshold
-"Fold older messages" = "Fold older messages";
-"Fold threshold description" = "Collapse long chat histories to keep recent messages visible.";
-"Fold: 8" = "8 messages";
-"Fold: 15" = "15 messages";
-"Fold: 30" = "30 messages";
-"Fold: Off" = "Off";
 
 // MARK: - SlashCommandManagerView
 "Imported %lld custom commands." = "Imported %lld custom commands.";

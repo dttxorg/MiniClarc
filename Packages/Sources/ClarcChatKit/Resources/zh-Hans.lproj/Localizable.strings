@@ -12,10 +12,9 @@
 "Thinking..." = "思考中…";
 "Generating response..." = "正在生成回复…";
 // MARK: - Turn folding
-"Show %lld earlier turns" = "显示 %lld 条更早的对话轮次";
-"Collapse earlier turns" = "收起更早的对话轮次";
 "Expand all turns" = "展开所有对话轮次";
 "Collapse all turns" = "折叠所有对话轮次";
+"+ %lld more phases" = "+ 还有 %lld 个阶段";
 
 // MARK: - Context compaction
 "Context compacted at %@" = "上下文已压缩于 %@";
@@ -23,14 +22,6 @@
 "Show summary" = "查看摘要";
 "Hide summary" = "隐藏摘要";
 "Compact context" = "压缩上下文";
-
-// MARK: - Fold threshold
-"Fold older messages" = "折叠更早的消息";
-"Fold threshold description" = "折叠较长的对话历史,仅保留最近的消息。";
-"Fold: 8" = "8 条";
-"Fold: 15" = "15 条";
-"Fold: 30" = "30 条";
-"Fold: Off" = "关闭";
 
 // MARK: - SlashCommandManagerView
 "Imported %lld custom commands." = "已导入 %lld 条自定义命令。";

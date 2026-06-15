@@ -249,14 +249,6 @@ final class AppState {
         didSet { UserDefaults.standard.set(focusMode, forKey: "focusMode") }
     }
 
-    // MARK: - Fold threshold
-
-    /// Number of recent settled messages to keep unfolded in MessageListView.
-    /// 0 disables folding entirely. Default is 8 (down from the legacy 30).
-    var foldThreshold: Int = (UserDefaults.standard.object(forKey: "foldThreshold") as? Int) ?? 8 {
-        didSet { UserDefaults.standard.set(foldThreshold, forKey: "foldThreshold") }
-    }
-
     /// When the estimated token count of the current session's
     /// settled messages exceeds this value, auto-trigger a context
     /// compaction. 0 disables auto-compact. Default 100k (Codex-style).

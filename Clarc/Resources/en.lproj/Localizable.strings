@@ -34,12 +34,6 @@
 "Background Tasks" = "Background Tasks";
 "Cancel background Claude streams on project switch" = "Cancel background Claude streams on project switch";
 "When on, switching to project B terminates the Claude CLI process still running in the background for project A, freeing memory. When off, parallel streams are kept." = "When on, switching to project B terminates the Claude CLI process still running in the background for project A, freeing memory. When off, parallel streams are kept.";
-"Fold older messages" = "Fold older messages";
-"fold.8" = "Fold: 8";
-"fold.15" = "Fold: 15";
-"fold.30" = "Fold: 30";
-"fold.off" = "Fold: Off";
-"Fold threshold description" = "Hide older turns behind a summary; latest turns stay expanded.";
 "User Manual" = "User Manual";
 "Chat" = "Chat";
 "Notifications" = "Notifications";

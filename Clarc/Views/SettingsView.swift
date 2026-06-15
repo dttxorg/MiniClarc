@@ -621,8 +621,6 @@ struct ChatSettingsTab: View {
                 Divider()
                 backgroundTaskSection
                 Divider()
-                foldThresholdSection
-                Divider()
                 autoPreviewSection
             }
             .padding(24)
@@ -749,30 +747,6 @@ struct ChatSettingsTab: View {
                 }
             }
             .toggleStyle(.switch)
-        }
-    }
-
-    // MARK: - Fold Threshold Section
-
-    private var foldThresholdSection: some View {
-        @Bindable var appState = appState
-        return VStack(alignment: .leading, spacing: 12) {
-            Text(LocalizedStringKey("Fold older messages"))
-                .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
-
-            Picker(LocalizedStringKey("Fold older messages"), selection: $appState.foldThreshold) {
-                Text(LocalizedStringKey("fold.8")).tag(8)
-                Text(LocalizedStringKey("fold.15")).tag(15)
-                Text(LocalizedStringKey("fold.30")).tag(30)
-                Text(LocalizedStringKey("fold.off")).tag(0)
-            }
-            .pickerStyle(.menu)
-            .fixedSize()
-
-            Text(LocalizedStringKey("Fold threshold description"))
-                .font(.system(size: ClaudeTheme.size(11)))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

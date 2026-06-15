@@ -51,12 +51,9 @@ extension Turn {
     ///   - items: settled messages in arrival order
     ///   - isStreamingLast: whether the tail block is currently
     ///     streaming
-    ///   - foldThreshold: kept for API compatibility; ignored. The
-    ///     baseline rule is "only the last turn expanded".
     static func makeTurns(
         from items: [ChatMessage],
-        isStreamingLast: Bool,
-        foldThreshold: Int
+        isStreamingLast: Bool
     ) -> [Turn] {
         var turns: [Turn] = []
         var current: Turn? = nil
