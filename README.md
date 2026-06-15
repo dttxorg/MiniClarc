@@ -11,7 +11,7 @@ Clarc is a lightweight native macOS desktop client for Claude Code. It brings th
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2015.0%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6.x-orange)
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.6.0-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
 
 ---
@@ -21,10 +21,9 @@ Clarc is a lightweight native macOS desktop client for Claude Code. It brings th
 This fork ships extra features that have not been (or are not yet) merged upstream. See [`FORK.md`](./FORK.md) for the full list. Highlights:
 
 - **Full Access permission mode** — auto-approves every tool call without prompts (uses `--permission-mode bypassPermissions` + `--allowedTools "*"`).
-- **Phase-based auto-collapse** — completed thinking / tool_use / tool_result blocks collapse to a single-line summary; the final text response stays expanded.
-- **Configurable fold threshold** — long histories fold to 8 / 15 / 30 / Off (was hardcoded 30).
+- **Codex-style phase folding** — each turn is split into phases delimited by the assistant's own task-update messages. A folded turn shows a list of phase titles (status icon + title + duration) so you can see what the assistant did without expanding; each phase expands to reveal its thinking, tool calls, and text. Turns without task updates fall back to tool-call-sequence + first-line titles. Per-turn collapse arrow and a "collapse all" toolbar button are retained.
 - **Focus Mode fix** — the chat view no longer freezes when Focus Mode is enabled.
-- **i18n polish** — PermissionModal countdown, fold threshold picker, phase labels, and permission descriptions all respect the system language (en / zh-Hans / ko).
+- **i18n polish** — PermissionModal countdown, phase labels, and permission descriptions all respect the system language (en / zh-Hans / ko).
 
 ---
 
